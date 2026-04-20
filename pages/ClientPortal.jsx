@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useNotification } from '../components/NotificationContext';
 import { useParams, Link } from 'react-router-dom';
 import {
   ChefHat, Calendar, CreditCard, Truck, Check, Clock,
@@ -875,6 +876,7 @@ function SubscriptionInfoCard({ client, onEditDates, clientPortalData = {}, reci
 
 // Modal for picking dishes for a specific delivery date
 function DateDishPickerModal({ client, dateStr, recipes, existingPicks, onSave, onClose }) {
+  const { toast } = useNotification();
   const mealsPerWeek = client.mealsPerWeek || 3;
 
   // Initialize with existing picks or empty arrays
@@ -911,7 +913,7 @@ function DateDishPickerModal({ client, dateStr, recipes, existingPicks, onSave, 
 
   const handleSubmit = () => {
     if (!isComplete()) {
-      alert(`Please select ${mealsPerWeek} of each: proteins, veggies, and starches.`);
+      toast(`Please select ${mealsPerWeek} of each: proteins, veggies, and starches.`, 'warning');
       return;
     }
     onSave({ proteins, veggies, starches, notes, mealsPerWeek });
@@ -1751,6 +1753,7 @@ function DatePickerView({ client, selectedDates, setSelectedDates, blockedDates 
 
 // Dish Picker View - for clients with chefChoice = false (they pick their own dishes)
 function DishPickerView({ client, recipes, clientPortalData, onSubmit }) {
+  const { toast } = useNotification();
   const mealsPerWeek = client.mealsPerWeek || 3;
   const numPicks = mealsPerWeek; // 3 or 4 of each category
 
@@ -1794,7 +1797,7 @@ function DishPickerView({ client, recipes, clientPortalData, onSubmit }) {
 
   const handleSubmit = () => {
     if (!isComplete()) {
-      alert(`Please select ${numPicks} of each: proteins, veggies, and starches.`);
+      toast(`Please select ${numPicks} of each: proteins, veggies, and starches.`, 'warning');
       return;
     }
     onSubmit({
@@ -2308,6 +2311,7 @@ function isBeforeDeadline(deliveryDate) {
 
 // Substitution Request Form - simplified text-only version
 function SubstitutionRequestForm({ clientName, clientPortalData, updateClientPortalData, deliveryDate }) {
+  const { toast } = useNotification();
   const [request, setRequest] = useState('');
   const [justSubmitted, setJustSubmitted] = useState(false);
 
@@ -2330,7 +2334,7 @@ function SubstitutionRequestForm({ clientName, clientPortalData, updateClientPor
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!request.trim()) {
-      alert('Please enter your substitution request');
+      toast('Please enter your substitution request', 'warning');
       return;
     }
 

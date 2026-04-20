@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useNotification } from '../components/NotificationContext';
 import { Outlet, Link } from 'react-router-dom';
 import { ChefHat, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
 
@@ -42,6 +43,7 @@ import { isConfigured, checkConnection } from '../lib/supabase';
 const GROCERY_MARKUP_PERCENT = 15;
 
 export default function ExperimentalLayout() {
+  const { toast, confirm } = useNotification();
   // Production data hook - single source of truth
   const appData = useAppData();
   const {
@@ -107,19 +109,19 @@ export default function ExperimentalLayout() {
   const ingredientsFileRef = useRef();
 
   // Ingredient functions
-  const addMasterIngredient = () => {
-    if (!newIngredient.name) { alert('Please enter an ingredient name'); return; }
+  const addMasterIngredient = async () => {
+    if (!newIngredient.name) { toast('Please enter an ingredient name', 'warning'); return; }
     const similar = findSimilarIngredients(newIngredient.name);
     const exact = findExactMatch(newIngredient.name);
-    if (exact) { alert(`"${newIngredient.name}" already exists as "${exact.name}"`); return; }
-    if (similar.length > 0 && !window.confirm(`Similar ingredients found: ${similar.map(s => s.name).join(', ')}\n\nAdd "${newIngredient.name}" anyway?`)) return;
+    if (exact) { toast(`"${newIngredient.name}" already exists as "${exact.name}"`, 'warning'); return; }
+    if (similar.length > 0 && !(await confirm(`Similar ingredients found: ${similar.map(s => s.name).join(', ')}\n\nAdd "${newIngredient.name}" anyway?`))) return;
     setMasterIngredients([...masterIngredients, { ...newIngredient, id: Date.now() }]);
     setNewIngredient(DEFAULT_NEW_INGREDIENT);
-    alert('Ingredient added!');
+    toast('Ingredient added!', 'success');
   };
 
-  const deleteMasterIngredient = (id) => {
-    if (window.confirm('Delete this ingredient?')) {
+  const deleteMasterIngredient = async (id) => {
+    if (await confirm('Delete this ingredient?')) {
       setMasterIngredients(masterIngredients.filter(ing => ing.id !== id));
     }
   };
@@ -145,7 +147,6 @@ export default function ExperimentalLayout() {
   // Fetch billing cycles and group with approved menus
   const loadBillingCycles = useCallback(async () => {
     if (!isSupabaseMode() || !isConfigured()) {
-      console.log('[BillingCycles] Supabase not configured, skipping fetch');
       return;
     }
 
@@ -289,7 +290,7 @@ export default function ExperimentalLayout() {
       };
     } catch (err) {
       console.error('[BillingCycles] Error generating invoice:', err);
-      alert(`Failed to generate invoice: ${err.message}`);
+      toast(`Failed to generate invoice: ${err.message}`, 'error');
       return null;
     }
   };
@@ -712,7 +713,7 @@ export default function ExperimentalLayout() {
     if (isSupabaseMode() && isConfigured()) {
       const isOnlineNow = await checkConnection();
       if (!isOnlineNow) {
-        alert('Cannot mark complete: database offline');
+        toast('Cannot mark complete: database offline', 'error');
         return;
       }
 
@@ -724,7 +725,7 @@ export default function ExperimentalLayout() {
       });
 
       if (!result.success) {
-        alert(`Cannot mark complete: ${result.error}`);
+        toast(`Cannot mark complete: ${result.error}`, 'error');
         return;
       }
     }
@@ -746,7 +747,7 @@ export default function ExperimentalLayout() {
   };
 
   const completeAllOrders = () => {
-    alert('Complete all orders - production behavior preserved');
+    toast('Complete all orders - production behavior preserved', 'info');
   };
 
   // Shopping lists
@@ -821,14 +822,14 @@ export default function ExperimentalLayout() {
   };
 
   const exportPrepList = () => {
-    alert('Export prep list - production behavior preserved');
+    toast('Export prep list - production behavior preserved', 'info');
   };
 
   // Recipe functions
   const saveRecipe = async () => {
-    if (!newRecipe.name) { alert('Please enter a recipe name'); return; }
+    if (!newRecipe.name) { toast('Please enter a recipe name', 'warning'); return; }
     const validIngredients = newRecipe.ingredients.filter(ing => ing.name && ing.quantity);
-    if (validIngredients.length === 0) { alert('Please add at least one ingredient'); return; }
+    if (validIngredients.length === 0) { toast('Please add at least one ingredient', 'warning'); return; }
 
     validIngredients.forEach(ing => addToMasterIngredients(ing));
     const recipeToSave = { name: newRecipe.name, instructions: newRecipe.instructions, ingredients: validIngredients };
@@ -838,19 +839,19 @@ export default function ExperimentalLayout() {
       if (result.success) {
         setRecipes(result.recipes);
         setNewRecipe(DEFAULT_NEW_RECIPE);
-        alert('Recipe saved!');
+        toast('Recipe saved!', 'success');
       } else {
-        alert(`Failed to save recipe: ${result.error}`);
+        toast(`Failed to save recipe: ${result.error}`, 'error');
       }
     } else {
       setRecipes({ ...recipes, [newRecipe.category]: [...recipes[newRecipe.category], recipeToSave] });
       setNewRecipe(DEFAULT_NEW_RECIPE);
-      alert('Recipe saved (local)!');
+      toast('Recipe saved (local)!', 'success');
     }
   };
 
   const deleteRecipe = async (category, index) => {
-    if (!window.confirm('Delete this recipe?')) return;
+    if (!(await confirm('Delete this recipe?'))) return;
     const recipe = recipes[category][index];
 
     if (isSupabaseMode()) {
@@ -858,7 +859,7 @@ export default function ExperimentalLayout() {
       if (result.success) {
         setRecipes(result.recipes);
       } else {
-        alert(`Failed to delete recipe: ${result.error}`);
+        toast(`Failed to delete recipe: ${result.error}`, 'error');
       }
     } else {
       setRecipes({ ...recipes, [category]: recipes[category].filter((_, i) => i !== index) });
@@ -939,16 +940,16 @@ export default function ExperimentalLayout() {
       if (result.success) {
         setRecipes(result.recipes);
         setEditingRecipe(null);
-        alert('Recipe updated!');
+        toast('Recipe updated!', 'success');
       } else {
-        alert(`Failed to update recipe: ${result.error}`);
+        toast(`Failed to update recipe: ${result.error}`, 'error');
       }
     } else {
       const updatedRecipes = { ...recipes };
       updatedRecipes[category][index] = recipeToSave;
       setRecipes(updatedRecipes);
       setEditingRecipe(null);
-      alert('Recipe updated (local)!');
+      toast('Recipe updated (local)!', 'success');
     }
   };
 

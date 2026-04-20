@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Upload, Download, Edit2, Check, X, Link2, Minus, Users, User, ChevronDown, ChevronUp, Truck } from 'lucide-react';
+import { Plus, Trash2, Upload, Download, Edit2, Check, X, Link2, Minus, Users, User, ChevronDown, ChevronUp, Truck, AlertTriangle } from 'lucide-react';
+import { useNotification } from '../components/NotificationContext';
 import { ZONES, DAYS, DEFAULT_CONTACT, DEFAULT_NEW_SUBSCRIPTION } from '../constants';
 import { isSupabaseMode } from '../lib/dataMode';
 import { saveClientToSupabase } from '../lib/database';
@@ -155,6 +156,7 @@ export default function ClientsTab({
   deliveryLog = [],
   orderHistory = []
 }) {
+  const { toast } = useNotification();
   const [editingIndex, setEditingIndex] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
   const [expandedDeliveries, setExpandedDeliveries] = useState({});
@@ -230,7 +232,7 @@ export default function ClientsTab({
     // Validate that we have a name (from name or displayName)
     const clientName = editingClient?.name || editingClient?.displayName;
     if (!clientName || clientName.trim() === '') {
-      alert('Client name is required');
+      toast('Client name is required', 'warning');
       return;
     }
 
@@ -246,8 +248,12 @@ export default function ClientsTab({
         setClients(result.clients);
         setEditingIndex(null);
         setEditingClient(null);
+        const hasDates = editingClient.deliveryDates && editingClient.deliveryDates.length > 0;
+        if (!hasDates && editingClient.status === 'active' && !editingClient.pickup) {
+          toast(`${clientName} saved. No delivery dates set — client won't appear on the Menu tab until at least one delivery date is added.`, 'warning');
+        }
       } else {
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
       const updated = [...clients];
@@ -301,7 +307,7 @@ export default function ClientsTab({
   const copyPortalLink = (subscription) => {
     const url = getClientPortalUrl(subscription);
     navigator.clipboard.writeText(url).then(() => {
-      alert(`Portal link copied!\n${url}`);
+      toast('Portal link copied!', 'success');
     }).catch(() => {
       prompt('Copy this link:', url);
     });
@@ -930,6 +936,12 @@ export default function ClientsTab({
                           )}
                           {subscription.pickup && (
                             <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">Pickup</span>
+                          )}
+                          {(!subscription.deliveryDates || subscription.deliveryDates.length === 0) && subscription.status === 'active' && !subscription.pickup && (
+                            <span className="text-xs px-2 py-1 rounded bg-amber-100 text-amber-700 flex items-center gap-1">
+                              <AlertTriangle size={11} />
+                              No delivery dates
+                            </span>
                           )}
                         </div>
                         <p className="text-sm text-gray-600">

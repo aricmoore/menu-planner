@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
+import { useNotification } from '../components/NotificationContext';
 import { Upload, Download, Save, X, Edit2, Check, Trash2, AlertCircle, RefreshCw, AlertTriangle, Copy } from 'lucide-react';
 import { STORE_SECTIONS, RECIPE_CATEGORIES } from '../constants';
 import { normalizeName } from '../utils';
-
-let recipesTabRenderCount = 0;
+import { isRecipeIncomplete, getIncompleteReasons } from '../utils/recipeUtils';
 
 export default function RecipesTab(props) {
-  recipesTabRenderCount++;
-  // Log ALL props to see exactly what's being passed
-  console.log(`[RecipesTab RENDER #${recipesTabRenderCount}] masterIngredients len:`, props.masterIngredients?.length);
+  const { toast } = useNotification();
 
   // Destructure after logging
   const {
@@ -47,12 +45,6 @@ export default function RecipesTab(props) {
   const recipeCounts = getRecipeCounts();
   const uniqueVendors = getUniqueVendors ? getUniqueVendors() : [];
 
-  // Check if a recipe is incomplete (missing costs or instructions)
-  const isRecipeIncomplete = (recipe) => {
-    const missingInstructions = !recipe.instructions || recipe.instructions.trim() === '';
-    const missingCosts = recipe.ingredients?.some(ing => !ing.cost || ing.cost === '' || parseFloat(ing.cost) === 0);
-    return missingInstructions || missingCosts;
-  };
 
   // Count incomplete recipes
   const getIncompleteCount = () => {
@@ -126,7 +118,7 @@ export default function RecipesTab(props) {
   const handleSync = () => {
     if (!syncRecipeIngredientsFromMaster) return;
     const result = syncRecipeIngredientsFromMaster();
-    alert(`Sync complete!\n\n${result.ingredientsAdded} ingredient(s) added to master list\n${result.costsUpdated} cost(s) updated from master`);
+    toast(`Sync complete: ${result.ingredientsAdded} ingredient(s) added, ${result.costsUpdated} cost(s) updated`, 'success');
   };
 
   // Vendor dropdown with "Add new" option
@@ -341,16 +333,6 @@ export default function RecipesTab(props) {
           <div>
             <label className="block text-sm font-medium mb-2" style={{ color: '#423d3c' }}>Ingredients</label>
             {newRecipe.ingredients.map((ing, index) => {
-              // Debug: log matching attempt
-              if (ing.name.length > 2) {
-                console.log('[ING MATCH DEBUG - New Recipe]', {
-                  input: ing.name,
-                  normalizedInput: normalizeName(ing.name),
-                  masterSample: masterIngredients.slice(0, 5).map(i => ({ name: i.name, normalized: normalizeName(i.name) })),
-                  masterCount: masterIngredients.length,
-                  match: findExactMatch(ing.name)
-                });
-              }
               const exactMatch = ing.name.length > 2 ? findExactMatch(ing.name) : null;
               const similarIngs = ing.name.length > 2 && !exactMatch ? findSimilarIngredients(ing.name) : [];
               // Check if ingredient has valid master ingredient_id (UUID format)
@@ -455,7 +437,6 @@ export default function RecipesTab(props) {
           </div>
           <button
             onClick={() => {
-              console.log('[RecipesTab] Save Recipe clicked', { recipeName: newRecipe?.name, category: newRecipe?.category });
               saveRecipe();
             }}
             className="px-6 py-2 rounded-lg text-white"
@@ -503,16 +484,6 @@ export default function RecipesTab(props) {
                         />
                         <p className="text-sm font-medium mb-2">Ingredients:</p>
                         {editingRecipe.recipe.ingredients.map((ing, ingIndex) => {
-                          // Debug: log matching attempt
-                          if (ing.name.length > 2) {
-                            console.log('[ING MATCH DEBUG - Edit Recipe]', {
-                              input: ing.name,
-                              normalizedInput: normalizeName(ing.name),
-                              masterSample: masterIngredients.slice(0, 5).map(i => ({ name: i.name, normalized: normalizeName(i.name) })),
-                              masterCount: masterIngredients.length,
-                              match: findExactMatch(ing.name)
-                            });
-                          }
                           const masterIng = ing.name.length > 2 ? findExactMatch(ing.name) : null;
                           const hasValidIngredientId = ing.ingredient_id && typeof ing.ingredient_id === 'string' && ing.ingredient_id.includes('-');
                           const isInMasterList = hasValidIngredientId || masterIng;
@@ -603,7 +574,6 @@ export default function RecipesTab(props) {
                         <div className="flex gap-2 mt-2">
                           <button
                             onClick={() => {
-                              console.log('[RecipesTab] Save Editing clicked', { recipeName: editingRecipe?.recipe?.name, category: editingRecipe?.category });
                               saveEditingRecipe();
                             }}
                             className="flex items-center gap-1 px-3 py-1 rounded text-white text-sm"
@@ -624,7 +594,7 @@ export default function RecipesTab(props) {
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             {isRecipeIncomplete(recipe) && (
-                              <AlertTriangle size={16} className="text-amber-500" title="Missing costs or instructions" />
+                              <AlertTriangle size={16} className="text-amber-500" title={`Incomplete: ${getIncompleteReasons(recipe)}`} />
                             )}
                             <p className="font-medium">{recipe.name}</p>
                             {cost > 0 && (

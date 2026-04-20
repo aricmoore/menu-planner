@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNotification } from '../components/NotificationContext';
+import { useAuth } from '../components/AuthContext';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ChefHat, Home, Calendar, Truck, AlertTriangle, RefreshCw,
@@ -42,6 +44,7 @@ import { supabase } from '../lib/supabase';
 
 // Custom hook for admin data
 function useAdminData() {
+  const { toast } = useNotification();
   const [clients, setClients] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
@@ -55,35 +58,19 @@ function useAdminData() {
   const [recipes, setRecipes] = useState({ protein: [], veg: [], starch: [], sauces: [], breakfast: [], soups: [] });
   const [masterIngredients, setMasterIngredients] = useState([]);
 
-  // Debug: Log whenever this hook re-renders
-  console.log('[useAdminData] hook executing, masterIngredients len:', masterIngredients?.length);
   const [groceryBills, setGroceryBills] = useState([]);
   const [weeks, setWeeks] = useState({});
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load data from Supabase on mount
   useEffect(() => {
-    console.log('[AdminPage useEffect] MOUNTED - starting data load');
-
     const loadData = async () => {
-      console.log('[AdminPage loadData] Function started');
       // NOTE: We always call loadFromSupabase - it handles mode detection internally
       // and falls back to localStorage if Supabase is unavailable
       try {
-        console.log('[AdminPage] About to import sync module...');
         // Import loadData from sync to get full data from Supabase
         const { loadData: loadFromSupabase } = await import('../lib/sync');
-        console.log('[AdminPage] Import successful, calling loadFromSupabase...');
         const result = await loadFromSupabase();
-        console.log('[AdminPage] loadFromSupabase returned, source:', result.source);
-
-        // DEBUG: Log what loadData returned
-        console.log('[AdminPage loadData] result:', {
-          hasData: !!result.data,
-          source: result.source,
-          masterIngredientsCount: result.data?.masterIngredients?.length,
-          masterIngredientsSample: result.data?.masterIngredients?.slice(0, 2)
-        });
 
         if (result.data) {
           if (result.data.clients) setClients(result.data.clients);
@@ -98,23 +85,19 @@ function useAdminData() {
           if (result.data.weeklyTasks) setWeeklyTasks(result.data.weeklyTasks);
           if (result.data.recipes) setRecipes(result.data.recipes);
           if (result.data.masterIngredients) {
-            console.log('[AdminPage] Setting masterIngredients, count:', result.data.masterIngredients.length);
             setMasterIngredients(result.data.masterIngredients);
-            console.log('[AdminPage AFTER SET] masterIngredients len:', result.data.masterIngredients?.length);
           }
           if (result.data.groceryBills) setGroceryBills(result.data.groceryBills);
           if (result.data.weeks) setWeeks(result.data.weeks);
-          console.log('[AdminPage] All state setters called - React will re-render');
         }
       } catch (e) {
         console.error('[AdminPage] Error loading data from Supabase:', e);
-        alert(`Failed to load data: ${e.message}`);
+        toast(`Failed to load data: ${e.message}`, 'error');
       }
 
       setIsLoaded(true);
     };
 
-    console.log('[AdminPage useEffect] About to call loadData()');
     loadData();
   }, []);
 
@@ -123,10 +106,8 @@ function useAdminData() {
     const loadGroceryBillsFromSupabase = async () => {
       if (!isSupabaseMode()) return;
 
-      console.log('[loadGroceryBills] fetching from Supabase...');
       try {
         const bills = await fetchAllGroceryBills();
-        console.log('[loadGroceryBills] fetched count:', bills.length);
         setGroceryBills(bills);
       } catch (err) {
         console.error('[loadGroceryBills] error:', err);
@@ -141,7 +122,6 @@ function useAdminData() {
   // Save data to Supabase (no localStorage)
   const saveData = useCallback(async (updates) => {
     if (!isConfigured()) {
-      console.log('[AdminPage] Supabase not configured, skipping save');
       return;
     }
 
@@ -168,11 +148,11 @@ function useAdminData() {
 
       const result = await syncToSupabase(dataToSave);
       if (!result.success) {
-        alert(`Failed to save: ${result.error}`);
+        toast(`Failed to save: ${result.error}`, 'error');
       }
     } catch (e) {
       console.error('[AdminPage] Error saving to Supabase:', e);
-      alert(`Failed to save: ${e.message}`);
+      toast(`Failed to save: ${e.message}`, 'error');
     }
   }, [clients, drivers, menuItems, deliveryLog, readyForDelivery, clientPortalData, blockedDates, adminSettings, customTasks, weeklyTasks, recipes, masterIngredients, groceryBills, weeks]);
 
@@ -231,9 +211,7 @@ function useAdminData() {
           await ensureWeeksExist(weekIds);
         }
 
-        console.log('[MENU SAVE] Saving', menuItemsToSave.length, 'menu items to Supabase');
         await saveAllMenus(menuItemsToSave);
-        console.log('[MENU SAVE] Success');
       } catch (error) {
         console.error('[MENU SAVE] Error:', error);
       }
@@ -251,7 +229,6 @@ function useAdminData() {
   }, [saveData]);
 
   const updateMasterIngredients = useCallback((newMasterIngredients) => {
-    console.log('[MASTER INGREDIENTS UPDATED]', newMasterIngredients?.length || 0);
     setMasterIngredients(newMasterIngredients);
     saveData({ masterIngredients: newMasterIngredients });
   }, [saveData]);
@@ -282,8 +259,6 @@ function useAdminData() {
     saveData({ weeks: newWeeks });
     return lockedWeek;
   }, [weeks, menuItems, clients, saveData]);
-
-  console.log('[useAdminData RETURN] masterIngredients len:', masterIngredients?.length);
 
   return {
     clients,
@@ -496,13 +471,6 @@ function DashboardSection({
     }));
 
     const projectedTotal = entries.reduce((sum, e) => sum + e.totalCost, 0);
-
-    console.log('[FoodCost] KDS rows (approved menu items):', approvedItems.length);
-    console.log('[FoodCost] Unique recipes in cook list:', entries.length);
-    entries.forEach(e => {
-      console.log(`[FoodCost]   ${e.name}: ${e.totalPortions} portions × $${e.costPerPortion.toFixed(2)} = $${e.totalCost.toFixed(2)}`);
-    });
-    console.log('[FoodCost] Projected total: $' + projectedTotal.toFixed(2));
 
     return { entries, projectedTotal };
   };
@@ -1303,15 +1271,11 @@ function BillingDatesSection({ clients, updateClients, blockedDates, updateBlock
   };
 
   const updateDeliveryDate = async (clientName, index, value) => {
-    console.log('[deliveryDates] updateDeliveryDate called', { clientName, index, value });
-
     const client = clients.find(c => c.name === clientName);
     if (!client) {
       console.error('[deliveryDates] client not found by name:', clientName);
       return;
     }
-
-    console.log('[deliveryDates] client found', { id: client.id, name: client.name, hasSupabaseFn: !!saveDeliveryDatesToSupabase });
 
     const dates = [...(client.deliveryDates || ['', '', '', ''])];
     // Ensure we have 4 slots
@@ -1321,17 +1285,12 @@ function BillingDatesSection({ clients, updateClients, blockedDates, updateBlock
     const sortedDates = dates.filter(d => d).sort();
     while (sortedDates.length < 4) sortedDates.push('');
 
-    console.log('[deliveryDates] sorted dates', sortedDates);
-
     // Update local state
     updateClientField(clientName, 'deliveryDates', sortedDates);
 
     // Save to Supabase if available
     if (saveDeliveryDatesToSupabase && client.id) {
-      console.log('[deliveryDates] calling saveDeliveryDatesToSupabase...');
       await saveDeliveryDatesToSupabase(client.id, clientName, sortedDates);
-    } else {
-      console.log('[deliveryDates] skip Supabase save', { hasFn: !!saveDeliveryDatesToSupabase, hasId: !!client.id });
     }
   };
 
@@ -1906,6 +1865,7 @@ function StyledMenuCard({ client, date, menuItems }) {
 
 // Menu Approval Section Component
 function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWithSnapshot, weeklyTasks = {}, clientPortalData = {}, recipes = {} }) {
+  const { toast, confirm } = useNotification();
   const navigate = useNavigate();
   const today = new Date().toISOString().split('T')[0];
 
@@ -2102,7 +2062,7 @@ function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWith
   const approvePairedMeals = (client) => {
     const meals = mealPairings[client.name];
     if (!meals || !areAllMealsPaired(client.name)) {
-      alert('Please pair all meals before approving.');
+      toast('Please pair all meals before approving.', 'warning');
       return;
     }
 
@@ -2112,7 +2072,7 @@ function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWith
     const nextDate = clientDates.find(d => d >= today);
 
     if (!nextDate) {
-      alert('No upcoming delivery date found for this client.');
+      toast('No upcoming delivery date found for this client.', 'warning');
       return;
     }
 
@@ -2126,7 +2086,7 @@ function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWith
       return updated;
     });
 
-    alert(`Menu created for ${client.displayName || client.name}! It will appear in the approval queue below.`);
+    toast(`Menu created for ${client.displayName || client.name}! It will appear in the approval queue below.`, 'success');
   };
 
   const clientsWithPicks = getClientsWithPicks();
@@ -2175,7 +2135,7 @@ function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWith
   };
 
   // Approve all menus (only those with complete tasks AND valid payment status)
-  const approveAndPushAll = () => {
+  const approveAndPushAll = async () => {
     const readyClients = [];
     const taskIncompleteClients = [];
     const pausedClients = [];
@@ -2207,7 +2167,7 @@ function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWith
       if (taskIncompleteClients.length > 0) {
         errorMsg += `\n\n${taskIncompleteClients.length} client(s) have incomplete tasks.`;
       }
-      alert(errorMsg);
+      toast(errorMsg, 'warning');
       return;
     }
 
@@ -2233,7 +2193,7 @@ function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWith
       }
     }
 
-    if (!window.confirm(message)) {
+    if (!(await confirm(message))) {
       return;
     }
 
@@ -2257,12 +2217,12 @@ function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWith
       lockWeekWithSnapshot(weekId);
     });
 
-    alert(`${readyClients.length} menu(s) approved and pushed to client portals!`);
+    toast(`${readyClients.length} menu(s) approved and pushed to client portals!`, 'success');
   };
 
   // Send a client's menu back for editing (removes from approval queue)
-  const sendBackForEdit = (clientName, date) => {
-    if (!window.confirm(`Send ${clientName}'s menu back for editing?\n\nThis will remove it from the approval queue. You can recreate it in Menu Planner.`)) {
+  const sendBackForEdit = async (clientName, date) => {
+    if (!(await confirm(`Send ${clientName}'s menu back for editing?\n\nThis will remove it from the approval queue. You can recreate it in Menu Planner.`))) {
       return;
     }
 
@@ -2619,6 +2579,9 @@ function MenuApprovalSection({ clients, menuItems, updateMenuItems, lockWeekWith
 }
 
 export default function AdminPage() {
+  const { toast, confirm } = useNotification();
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
   const {
     clients,
     drivers,
@@ -2649,8 +2612,6 @@ export default function AdminPage() {
     lockWeekWithSnapshot
   } = useAdminData();
 
-  console.log('[AdminPage RENDER] masterIngredients len:', masterIngredients?.length);
-
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState('overview');
   const [newDriver, setNewDriver] = useState(DEFAULT_NEW_DRIVER);
@@ -2677,30 +2638,17 @@ export default function AdminPage() {
   const [newMenuItem, setNewMenuItem] = useState(DEFAULT_NEW_MENU_ITEM);
   const [selectedWeekId, setSelectedWeekId] = useState(() => getWeekIdFromDate(new Date().toISOString().split('T')[0]));
 
-  // DIAGNOSTIC LOG - after selectedWeekId defined
-  console.log('[AdminPage] selectedWeekId:', selectedWeekId, 'menuItems.length:', menuItems?.length);
-
   // Fetch menus from Supabase when selectedWeekId changes
   useEffect(() => {
-    console.log('[AdminPage] menu fetch useEffect triggered', {
-      selectedWeekId,
-      isSupabaseMode: isSupabaseMode(),
-      isConfigured: isConfigured()
-    });
-
     if (!selectedWeekId) {
-      console.log('[AdminPage] skipping menu fetch - no selectedWeekId');
       return;
     }
 
     if (!isSupabaseMode() || !isConfigured()) {
-      console.log('[AdminPage] skipping menu fetch - not in Supabase mode or not configured');
       return;
     }
 
     const loadMenusForWeek = async () => {
-      console.log('[AdminPage] fetching menus for week:', selectedWeekId);
-
       try {
         const { data, error } = await supabase
           .from('menus')
@@ -2712,9 +2660,6 @@ export default function AdminPage() {
           console.error('[AdminPage] menu fetch error:', error);
           return;
         }
-
-        console.log('[AdminPage] menus fetched count:', data?.length);
-        console.log('[AdminPage] first 3 rows:', data?.slice(0, 3));
 
         // Transform to app format
         const menus = (data || []).map(m => ({
@@ -2731,7 +2676,6 @@ export default function AdminPage() {
           approved: m.approved || false
         }));
 
-        console.log('[AdminPage] transformed menus:', menus.length, 'setting state...');
         updateMenuItems(menus);
       } catch (err) {
         console.error('[AdminPage] menu fetch exception:', err);
@@ -2771,7 +2715,7 @@ export default function AdminPage() {
   const handleMigration = async () => {
     if (isMigrating) return;
 
-    if (!window.confirm('This will import all localStorage data to Supabase.\n\nExisting records will be updated (not duplicated).\n\nProceed?')) {
+    if (!(await confirm('This will import all localStorage data to Supabase.\n\nExisting records will be updated (not duplicated).\n\nProceed?'))) {
       return;
     }
 
@@ -2820,8 +2764,8 @@ export default function AdminPage() {
       const existingNames = new Set(masterIngredients.map(i => i.name.toLowerCase()));
       const newIngredients = imported.filter(i => !existingNames.has(i.name.toLowerCase()));
       updateMasterIngredients([...masterIngredients, ...newIngredients]);
-      alert(`Imported ${newIngredients.length} new ingredient(s). ${imported.length - newIngredients.length} duplicate(s) skipped.`);
-    }, (err) => alert('Error parsing CSV: ' + err.message));
+      toast(`Imported ${newIngredients.length} new ingredient(s). ${imported.length - newIngredients.length} duplicate(s) skipped.`, 'success');
+    }, (err) => toast('Error parsing CSV: ' + err.message, 'error'));
     e.target.value = '';
   };
 
@@ -3035,7 +2979,7 @@ export default function AdminPage() {
   // Driver management
   const addDriver = async () => {
     if (!newDriver.name) {
-      alert('Please enter a driver name');
+      toast('Please enter a driver name', 'warning');
       return;
     }
 
@@ -3046,7 +2990,7 @@ export default function AdminPage() {
         setDrivers(result.drivers);
         setNewDriver(DEFAULT_NEW_DRIVER);
       } else {
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
       // Local mode: save to localStorage
@@ -3056,7 +3000,7 @@ export default function AdminPage() {
   };
 
   const deleteDriverAtIndex = async (index) => {
-    if (!window.confirm('Delete this driver?')) return;
+    if (!(await confirm('Delete this driver?'))) return;
 
     const driver = drivers[index];
 
@@ -3066,7 +3010,7 @@ export default function AdminPage() {
       if (result.success) {
         setDrivers(result.drivers);
       } else {
-        alert(`Delete failed: ${result.error}`);
+        toast(`Delete failed: ${result.error}`, 'error');
       }
     } else {
       // Local mode or temp driver: just remove from local state
@@ -3088,7 +3032,7 @@ export default function AdminPage() {
         setEditingDriverIndex(null);
         setEditingDriver(null);
       } else {
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
       // Local mode: save to localStorage
@@ -3215,7 +3159,6 @@ export default function AdminPage() {
       // Await the save and update state immediately
       try {
         const result = await saveIngredientToSupabase(ingredientToSave);
-        console.log('[addToMasterIngredients] save result:', result.success, 'count:', result.ingredients?.length);
         if (result.success) {
           updateMasterIngredients(result.ingredients);
         }
@@ -3269,18 +3212,18 @@ export default function AdminPage() {
   // Menu functions
   const addMenuItem = () => {
     if (!newMenuItem.protein && !newMenuItem.veg && !newMenuItem.starch && newMenuItem.extras.length === 0) {
-      alert('Please select at least one dish');
+      toast('Please select at least one dish', 'warning');
       return;
     }
     if (selectedClients.length === 0) {
-      alert('Please select at least one client');
+      toast('Please select at least one client', 'warning');
       return;
     }
     const newItems = selectedClients.map(clientName => {
       const client = clients.find(c => c.name === clientName);
       if (!client?.id) {
         console.error('[addMenuItem] Client missing id:', { clientName, client });
-        alert(`Cannot add menu for ${clientName}: client data is missing`);
+        toast(`Cannot add menu for ${clientName}: client data is missing`, 'error');
         return null;
       }
       const clientPortions = client.portions || client.persons || 1;
@@ -3302,8 +3245,8 @@ export default function AdminPage() {
 
   const deleteMenuItem = (id) => updateMenuItems(menuItems.filter(item => item.id !== id));
 
-  const clearMenu = () => {
-    if (window.confirm('Clear all menu items?')) {
+  const clearMenu = async () => {
+    if (await confirm('Clear all menu items?')) {
       updateMenuItems([]);
       setSelectedClients([]);
     }
@@ -3337,17 +3280,14 @@ export default function AdminPage() {
 
   // Recipe functions
   const saveRecipe = async () => {
-    console.log('[AdminPage.saveRecipe] START');
-    console.log('[AdminPage.saveRecipe] dataMode:', getDataMode(), 'isSupabaseMode:', isSupabaseMode());
-
-    if (!newRecipe.name) { alert('Please enter a recipe name'); return; }
+    if (!newRecipe.name) { toast('Please enter a recipe name', 'warning'); return; }
     const validIngredients = newRecipe.ingredients.filter(ing => ing.name && ing.quantity);
-    if (validIngredients.length === 0) { alert('Please add at least one ingredient with name and quantity'); return; }
+    if (validIngredients.length === 0) { toast('Please add at least one ingredient with name and quantity', 'warning'); return; }
 
     // Check for duplicate ingredients
     const duplicates = findDuplicateIngredients(validIngredients);
     if (duplicates.length > 0) {
-      alert(`Error: ${duplicates.join(', ')} is entered twice. Please combine or remove duplicates.`);
+      toast(`Duplicate ingredient: ${duplicates.join(', ')}. Please combine or remove duplicates.`, 'warning');
       return;
     }
 
@@ -3359,51 +3299,39 @@ export default function AdminPage() {
       instructions: newRecipe.instructions,
       ingredients: validIngredients
     };
-    console.log('[AdminPage.saveRecipe] recipeToSave:', recipeToSave.name, 'category:', newRecipe.category);
-
     if (isConfigured()) {
-      console.log('[AdminPage.saveRecipe] calling saveRecipeToSupabase...');
       const result = await saveRecipeToSupabase(recipeToSave, newRecipe.category);
-      console.log('[AdminPage.saveRecipe] result:', result.success, result.error || '');
       if (result.success) {
         // Update both React state AND localStorage for persistence on refresh
         setRecipes(result.recipes);
         saveData({ recipes: result.recipes });
         setNewRecipe(DEFAULT_NEW_RECIPE);
-        alert('Recipe saved!');
+        toast('Recipe saved!', 'success');
       } else {
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
-      console.log('[AdminPage.saveRecipe] LOCAL MODE - not calling Supabase');
       updateRecipes({ ...recipes, [newRecipe.category]: [...recipes[newRecipe.category], recipeToSave] });
       setNewRecipe(DEFAULT_NEW_RECIPE);
-      alert('Recipe saved (local only)!');
+      toast('Recipe saved (local only)!', 'success');
     }
   };
 
   const deleteRecipe = async (category, index) => {
-    console.log('[AdminPage.deleteRecipe] START', category, index);
-    console.log('[AdminPage.deleteRecipe] dataMode:', getDataMode(), 'isSupabaseMode:', isSupabaseMode());
-
-    if (!window.confirm('Delete this recipe?')) return;
+    if (!(await confirm('Delete this recipe?'))) return;
 
     const recipe = recipes[category][index];
-    console.log('[AdminPage.deleteRecipe] recipe:', recipe?.name);
 
     if (isConfigured()) {
-      console.log('[AdminPage.deleteRecipe] calling deleteRecipeFromSupabase...');
       const result = await deleteRecipeFromSupabase(recipe.name, category);
-      console.log('[AdminPage.deleteRecipe] result:', result.success, result.error || '');
       if (result.success) {
         // Update both React state AND localStorage for persistence on refresh
         setRecipes(result.recipes);
         saveData({ recipes: result.recipes });
       } else {
-        alert(`Delete failed: ${result.error}`);
+        toast(`Delete failed: ${result.error}`, 'error');
       }
     } else {
-      console.log('[AdminPage.deleteRecipe] LOCAL MODE - not calling Supabase');
       updateRecipes({ ...recipes, [category]: recipes[category].filter((_, i) => i !== index) });
     }
   };
@@ -3423,7 +3351,6 @@ export default function AdminPage() {
         );
         if (masterMatch && masterMatch.id) {
           ingredientId = masterMatch.id;
-          console.log('[AdminPage.startEditingRecipe] Backfilled ingredient_id for:', ing.name, '->', ingredientId);
         }
       }
 
@@ -3497,16 +3424,13 @@ export default function AdminPage() {
   };
 
   const saveEditingRecipe = async () => {
-    console.log('[AdminPage.saveEditingRecipe] START');
-    console.log('[AdminPage.saveEditingRecipe] dataMode:', getDataMode(), 'isSupabaseMode:', isSupabaseMode());
-
     const { category, index, recipe } = editingRecipe;
     const validIngredients = recipe.ingredients.filter(ing => ing.name && ing.quantity);
 
     // Check for duplicate ingredients
     const duplicates = findDuplicateIngredients(validIngredients);
     if (duplicates.length > 0) {
-      alert(`Error: ${duplicates.join(', ')} is entered twice. Please combine or remove duplicates.`);
+      toast(`Duplicate ingredient: ${duplicates.join(', ')}. Please combine or remove duplicates.`, 'warning');
       return;
     }
 
@@ -3514,74 +3438,62 @@ export default function AdminPage() {
     await Promise.all(validIngredients.map(ing => addToMasterIngredients(ing)));
 
     const recipeToSave = { ...recipe, ingredients: validIngredients };
-    console.log('[AdminPage.saveEditingRecipe] recipe:', recipeToSave.name, 'category:', category);
 
     if (isConfigured()) {
-      console.log('[AdminPage.saveEditingRecipe] calling saveRecipeToSupabase...');
       const result = await saveRecipeToSupabase(recipeToSave, category);
-      console.log('[AdminPage.saveEditingRecipe] result:', result.success, result.error || '');
       if (result.success) {
         // Update both React state AND localStorage for persistence on refresh
         setRecipes(result.recipes);
         saveData({ recipes: result.recipes });
         setEditingRecipe(null);
-        alert('Recipe updated!');
+        toast('Recipe updated!', 'success');
       } else {
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
-      console.log('[AdminPage.saveEditingRecipe] LOCAL MODE - not calling Supabase');
       const updatedRecipes = { ...recipes };
       updatedRecipes[category][index] = recipeToSave;
       updateRecipes(updatedRecipes);
       setEditingRecipe(null);
-      alert('Recipe updated (local only)!');
+      toast('Recipe updated (local only)!', 'success');
     }
   };
 
   // Ingredient management functions
   const addMasterIngredient = async () => {
-    if (!newIngredient.name) { alert('Please enter an ingredient name'); return; }
+    if (!newIngredient.name) { toast('Please enter an ingredient name', 'warning'); return; }
     const similar = findSimilarIngredients(newIngredient.name);
     const exact = findExactMatch(newIngredient.name);
-    if (exact) { alert(`"${newIngredient.name}" already exists as "${exact.name}"`); return; }
-    if (similar.length > 0 && !window.confirm(`Similar ingredients found: ${similar.map(s => s.name).join(', ')}\n\nAdd "${newIngredient.name}" anyway?`)) return;
+    if (exact) { toast(`"${newIngredient.name}" already exists as "${exact.name}"`, 'warning'); return; }
+    if (similar.length > 0 && !(await confirm(`Similar ingredients found: ${similar.map(s => s.name).join(', ')}\n\nAdd "${newIngredient.name}" anyway?`))) return;
 
     if (isConfigured()) {
-      console.log('[Ingredients.add] START', { name: newIngredient.name });
       const result = await saveIngredientToSupabase(newIngredient);
       if (result.success) {
-        console.log('[Ingredients.add] SUCCESS');
         updateMasterIngredients(result.ingredients);
         setNewIngredient(DEFAULT_NEW_INGREDIENT);
-        alert('Ingredient added!');
+        toast('Ingredient added!', 'success');
       } else {
-        console.log('[Ingredients.add] ERROR', result.error);
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
-      console.log('[Ingredients.add] LOCAL MODE');
       updateMasterIngredients([...masterIngredients, { ...newIngredient, id: Date.now() }]);
       setNewIngredient(DEFAULT_NEW_INGREDIENT);
-      alert('Ingredient added (local only)!');
+      toast('Ingredient added (local only)!', 'success');
     }
   };
 
   const deleteMasterIngredient = async (id) => {
-    if (!window.confirm('Delete this ingredient?')) return;
+    if (!(await confirm('Delete this ingredient?'))) return;
 
     if (isConfigured()) {
-      console.log('[Ingredients.delete] START', { id });
       const result = await deleteIngredientFromSupabase(id);
       if (result.success) {
-        console.log('[Ingredients.delete] SUCCESS');
         updateMasterIngredients(result.ingredients);
       } else {
-        console.log('[Ingredients.delete] ERROR', result.error);
-        alert(`Delete failed: ${result.error}`);
+        toast(`Delete failed: ${result.error}`, 'error');
       }
     } else {
-      console.log('[Ingredients.delete] LOCAL MODE');
       updateMasterIngredients(masterIngredients.filter(ing => ing.id !== id));
     }
   };
@@ -3592,22 +3504,16 @@ export default function AdminPage() {
   };
 
   const saveEditingMasterIngredient = async () => {
-    console.log('[Ingredients.save] START', { id: editingIngredientId, name: editingIngredientData?.name });
-    console.log('[Ingredients.save] mode:', isConfigured() ? 'supabase' : 'local');
-
     if (isConfigured()) {
       const result = await saveIngredientToSupabase(editingIngredientData);
       if (result.success) {
-        console.log('[Ingredients.save] SUCCESS');
         updateMasterIngredients(result.ingredients);
         setEditingIngredientId(null);
         setEditingIngredientData(null);
       } else {
-        console.log('[Ingredients.save] ERROR', result.error);
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
-      console.log('[Ingredients.save] LOCAL MODE - updating local state');
       updateMasterIngredients(masterIngredients.map(ing => ing.id === editingIngredientId ? { ...editingIngredientData } : ing));
       setEditingIngredientId(null);
       setEditingIngredientData(null);
@@ -3633,7 +3539,7 @@ export default function AdminPage() {
       });
     });
     setDuplicateWarnings(found);
-    if (found.length === 0) alert('No duplicate ingredients found!');
+    if (found.length === 0) toast('No duplicate ingredients found', 'info');
   };
 
   const mergeIngredients = (keepId, removeId) => {
@@ -3652,7 +3558,7 @@ export default function AdminPage() {
     updateRecipes(updatedRecipes);
     updateMasterIngredients(masterIngredients.filter(i => i.id !== removeId));
     setDuplicateWarnings(duplicateWarnings.filter(d => d.ing1.id !== removeId && d.ing2.id !== removeId));
-    alert(`Merged "${remove.name}" into "${keep.name}"`);
+    toast(`Merged "${remove.name}" into "${keep.name}"`, 'success');
   };
 
   // Calendar functions
@@ -3696,7 +3602,7 @@ export default function AdminPage() {
   // Custom tasks
   const addCustomTask = () => {
     if (!newTask.title) {
-      alert('Please enter a task title');
+      toast('Please enter a task title', 'warning');
       return;
     }
     updateCustomTasks([...customTasks, { ...newTask, id: Date.now(), completed: false }]);
@@ -3716,7 +3622,7 @@ export default function AdminPage() {
   // Client management functions
   const addClient = async () => {
     if (!newClient.name && !newClient.displayName) {
-      alert('Please enter a client name');
+      toast('Please enter a client name', 'warning');
       return;
     }
 
@@ -3729,8 +3635,6 @@ export default function AdminPage() {
     if (isSupabaseMode()) {
       const result = await saveClientToSupabase(clientToSave);
       if (result.success) {
-        console.log('[CLIENT SAVE] success', result);
-        console.log('[CLIENT SAVE] refreshing clients...');
         updateClients(result.clients);
         setNewClient({
           name: '', displayName: '', persons: 1,
@@ -3740,10 +3644,10 @@ export default function AdminPage() {
           pickup: false, planPrice: 0, serviceFee: 0, prepayDiscount: false,
           newClientFeePaid: false, paysOwnGroceries: false
         });
-        alert('Client added!');
+        toast('Client added!', 'success');
       } else {
         console.error('[CLIENT SAVE] failed', result.error);
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
       updateClients([...clients, clientToSave]);
@@ -3755,12 +3659,12 @@ export default function AdminPage() {
         pickup: false, planPrice: 0, serviceFee: 0, prepayDiscount: false,
         newClientFeePaid: false, paysOwnGroceries: false
       });
-      alert('Client added!');
+      toast('Client added!', 'success');
     }
   };
 
   const deleteClient = async (index) => {
-    if (!window.confirm('Delete this client?')) return;
+    if (!(await confirm('Delete this client?'))) return;
 
     const client = clients[index];
 
@@ -3768,12 +3672,10 @@ export default function AdminPage() {
       const clientName = client.name || client.displayName;
       const result = await deleteClientFromSupabase(clientName);
       if (result.success) {
-        console.log('[CLIENT DELETE] success', result);
-        console.log('[CLIENT DELETE] refreshing clients...');
         updateClients(result.clients);
       } else {
         console.error('[CLIENT DELETE] failed', result.error);
-        alert(`Delete failed: ${result.error}`);
+        toast(`Delete failed: ${result.error}`, 'error');
       }
     } else {
       updateClients(clients.filter((_, i) => i !== index));
@@ -3796,32 +3698,22 @@ export default function AdminPage() {
 
   // Grocery tracking functions
   const addGroceryBill = async () => {
-    console.log('[saveGroceryBill] start + payload', {
-      date: newGroceryBill.date,
-      amount: newGroceryBill.amount,
-      store: newGroceryBill.store
-    });
-
     // Validation
     if (!newGroceryBill.amount || parseFloat(newGroceryBill.amount) <= 0) {
-      console.log('[saveGroceryBill] error - amount must be > 0');
-      alert('Please enter a valid amount greater than 0');
+      toast('Please enter a valid amount greater than 0', 'warning');
       return;
     }
 
     if (!newGroceryBill.date) {
-      console.log('[saveGroceryBill] error - date is required');
-      alert('Please enter a date');
+      toast('Please enter a date', 'warning');
       return;
     }
 
     // Calculate week ID from the bill date
     const billWeekId = getWeekIdFromDate(newGroceryBill.date);
-    console.log('[saveGroceryBill] calculated weekId:', billWeekId);
 
     if (!billWeekId) {
-      console.log('[saveGroceryBill] error - could not calculate weekId');
-      alert('Could not determine week for this date');
+      toast('Could not determine week for this date', 'error');
       return;
     }
 
@@ -3835,8 +3727,6 @@ export default function AdminPage() {
       });
 
       if (result.success) {
-        console.log('[saveGroceryBill] success');
-        console.log('[saveGroceryBill] refetch count:', result.bills?.length || 0);
         // Update local state with refetched bills
         if (result.bills) {
           // Merge with existing bills from other weeks
@@ -3845,25 +3735,22 @@ export default function AdminPage() {
         }
         setNewGroceryBill({ date: new Date().toISOString().split('T')[0], amount: '', store: '', notes: '' });
       } else {
-        console.log('[saveGroceryBill] error', result.error);
-        alert('Failed to save bill: ' + result.error);
+        toast('Failed to save bill: ' + result.error, 'error');
       }
     } else {
       // Local storage mode
-      console.log('[saveGroceryBill] using local storage mode');
       updateGroceryBills([...groceryBills, {
         ...newGroceryBill,
         id: Date.now(),
         weekId: billWeekId,
         amount: parseFloat(newGroceryBill.amount)
       }]);
-      console.log('[saveGroceryBill] success (local)');
       setNewGroceryBill({ date: new Date().toISOString().split('T')[0], amount: '', store: '', notes: '' });
     }
   };
 
   const deleteGroceryBill = async (id, weekId) => {
-    if (!window.confirm('Delete this bill?')) return;
+    if (!(await confirm('Delete this bill?'))) return;
 
     if (isSupabaseMode()) {
       const result = await deleteGroceryBillFromSupabase(id, weekId);
@@ -3876,7 +3763,7 @@ export default function AdminPage() {
           updateGroceryBills(groceryBills.filter(b => b.id !== id));
         }
       } else {
-        alert('Failed to delete bill: ' + result.error);
+        toast('Failed to delete bill: ' + result.error, 'error');
       }
     } else {
       updateGroceryBills(groceryBills.filter(b => b.id !== id));
@@ -3993,6 +3880,14 @@ export default function AdminPage() {
               <Home size={20} />
               Back to App
             </Link>
+            {isConfigured() && (
+              <button
+                onClick={async () => { await signOut(); navigate('/login'); }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors text-sm"
+              >
+                Sign out
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -4095,20 +3990,14 @@ export default function AdminPage() {
         )}
 
         {/* Recipes Section */}
-        {activeSection === 'recipes' && (() => {
-          console.log('[AdminPage -> RecipesTab] IIFE scope check:', {
-            masterIngredientsLen: masterIngredients?.length,
-            masterIngredientsIsArray: Array.isArray(masterIngredients),
-            masterIngredientsSample: masterIngredients?.slice?.(0, 2)?.map?.(i => i?.name)
-          });
-          return (
+        {activeSection === 'recipes' && (
           <RecipesTab
             recipes={recipes}
             newRecipe={newRecipe}
             setNewRecipe={setNewRecipe}
             editingRecipe={editingRecipe}
             setEditingRecipe={setEditingRecipe}
-            masterIngredients={(console.log('[EXACT PROP VALUE at RecipesTab]', masterIngredients?.length), masterIngredients)}
+            masterIngredients={masterIngredients}
             recipesFileRef={recipesFileRef}
             findExactMatch={findExactMatch}
             findSimilarIngredients={findSimilarIngredients}
@@ -4126,8 +4015,7 @@ export default function AdminPage() {
             updateMasterIngredientCost={updateMasterIngredientCost}
             syncRecipeIngredientsFromMaster={syncRecipeIngredientsFromMaster}
           />
-          );
-        })()}
+        )}
 
         {/* Ingredients Section */}
         {activeSection === 'ingredients' && (
@@ -4999,7 +4887,7 @@ export default function AdminPage() {
                               onClick={() => {
                                 const url = `${window.location.origin}/driver`;
                                 navigator.clipboard.writeText(url);
-                                alert('Driver login link copied to clipboard!');
+                                toast('Driver login link copied to clipboard!', 'success');
                               }}
                               className="flex items-center gap-2 px-3 py-2 rounded-lg border-2 text-sm"
                               style={{ borderColor: '#ebb582' }}
@@ -5203,14 +5091,14 @@ export default function AdminPage() {
             file,
             (imported) => {
               if (imported.length === 0) {
-                alert('No subscriptions found in CSV. Please check the file format.\n\nExpected columns: Name, Display Name, Address, Email, Phone, Portions, Meals, etc.');
+                toast('No subscriptions found in CSV. Check the file format.', 'error');
                 return;
               }
               const totalContacts = imported.reduce((sum, sub) => sum + (sub.contacts?.length || 0), 0);
               updateClients(imported);
-              alert(`Import successful!\n\n${imported.length} subscription(s) imported\n${totalContacts} contact(s) total`);
+              toast(`Import successful: ${imported.length} subscription(s), ${totalContacts} contact(s)`, 'success');
             },
-            (err) => alert('Error parsing CSV: ' + (err.message || err))
+            (err) => toast('Error parsing CSV: ' + (err.message || err), 'error')
           );
           e.target.value = '';
         }}

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Edit2, Trash2, Check, X } from 'lucide-react';
+import { useNotification } from '../components/NotificationContext';
 
 const inputStyle = "p-2 border-2 rounded-lg";
 const borderStyle = { borderColor: '#ebb582' };
 
 export default function HistoryTab({ historyByClient, orderHistory, setOrderHistory }) {
+  const { confirm } = useNotification();
   const [editingId, setEditingId] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
 
@@ -33,8 +35,8 @@ export default function HistoryTab({ historyByClient, orderHistory, setOrderHist
     setEditingOrder(null);
   };
 
-  const deleteOrder = (orderId) => {
-    if (window.confirm('Delete this order from history?')) {
+  const deleteOrder = async (orderId) => {
+    if (await confirm('Delete this order from history?')) {
       setOrderHistory(orderHistory.filter(o => o.id !== orderId));
     }
   };

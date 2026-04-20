@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
+import { useNotification } from '../components/NotificationContext';
 import { ZONES, DEFAULT_NEW_DRIVER } from '../constants';
 import { isSupabaseMode } from '../lib/dataMode';
 import { saveDriverToSupabase, deleteDriverFromSupabase } from '../lib/database';
@@ -20,12 +21,13 @@ export default function DriversTab({
   newDriver,
   setNewDriver
 }) {
+  const { toast, confirm } = useNotification();
   const [editingIndex, setEditingIndex] = useState(null);
   const [editingDriver, setEditingDriver] = useState(null);
 
   const addDriver = async () => {
     if (!newDriver.name) {
-      alert('Please enter a driver name');
+      toast('Please enter a driver name', 'warning');
       return;
     }
 
@@ -34,19 +36,19 @@ export default function DriversTab({
       if (result.success) {
         setDrivers(result.drivers);
         setNewDriver(DEFAULT_NEW_DRIVER);
-        alert('Driver added!');
+        toast('Driver added!', 'success');
       } else {
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
       setDrivers([...drivers, { ...newDriver, id: `temp-${Date.now()}` }]);
       setNewDriver(DEFAULT_NEW_DRIVER);
-      alert('Driver added!');
+      toast('Driver added!', 'success');
     }
   };
 
   const deleteDriver = async (index) => {
-    if (!window.confirm('Delete this driver?')) return;
+    if (!(await confirm('Delete this driver?'))) return;
 
     const driver = drivers[index];
 
@@ -55,7 +57,7 @@ export default function DriversTab({
       if (result.success) {
         setDrivers(result.drivers);
       } else {
-        alert(`Delete failed: ${result.error}`);
+        toast(`Delete failed: ${result.error}`, 'error');
       }
     } else {
       setDrivers(drivers.filter((_, i) => i !== index));
@@ -80,7 +82,7 @@ export default function DriversTab({
         setEditingIndex(null);
         setEditingDriver(null);
       } else {
-        alert(`Save failed: ${result.error}`);
+        toast(`Save failed: ${result.error}`, 'error');
       }
     } else {
       const updated = [...drivers];

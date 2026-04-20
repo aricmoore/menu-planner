@@ -107,13 +107,11 @@ export function useDriverData() {
   // Fetch saved routes from delivery_runs table for the week
   const fetchSavedRoutes = useCallback(async (weekId, zone = null) => {
     if (!isConfigured()) {
-      console.log('[DriverData] skipping route fetch - Supabase not configured');
       return [];
     }
 
     const online = await checkConnection();
     if (!online) {
-      console.log('[DriverData] skipping route fetch - offline');
       return [];
     }
 
@@ -122,7 +120,6 @@ export function useDriverData() {
     try {
       // Fetch raw delivery_runs rows
       const runs = await fetchDeliveryRunsForWeek(weekId, zone);
-      console.log('[DriverView] loaded delivery_runs', { weekId, count: runs.length });
 
       // Transform to internal format
       const routes = runs.map(run => ({

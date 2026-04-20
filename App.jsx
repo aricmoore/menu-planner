@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { useNotification } from './components/NotificationContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChefHat, Settings } from 'lucide-react';
 import Papa from 'papaparse';
@@ -7,6 +8,8 @@ import WorkflowStatus from './components/WorkflowStatus';
 import WeekSelector from './components/WeekSelector';
 import SyncStatus from './components/SyncStatus';
 import { useAppData } from './hooks/useAppData';
+import ErrorBoundary from './components/ErrorBoundary';
+import { useAuth } from './components/AuthContext';
 // Direct imports to avoid barrel export initialization issues
 import RecipesTab from './tabs/RecipesTab';
 import KDSTab from './tabs/KDSTab';
@@ -24,11 +27,13 @@ import {
   downloadCSV
 } from './utils';
 import { DEFAULT_NEW_CLIENT, DEFAULT_NEW_RECIPE, DEFAULT_NEW_MENU_ITEM, DEFAULT_NEW_INGREDIENT } from './constants';
-import { fetchKdsDishStatuses, setKdsDishDone, saveRecipeToSupabase, deleteRecipeFromSupabase, getUnapprovedMenuCountForWeek, approveAllMenusForWeek, fetchMenusByWeek } from './lib/database';
+import { fetchKdsDishStatuses, setKdsDishDone, saveRecipeToSupabase, deleteRecipeFromSupabase, getUnapprovedMenuCountForWeek, approveAllMenusForWeek, fetchMenusByWeek, deleteClientFromSupabase } from './lib/database';
 import { isSupabaseMode, getDataMode } from './lib/dataMode';
 import { checkConnection, isConfigured } from './lib/supabase';
 
 export default function App() {
+  const { toast, confirm } = useNotification();
+  const { signOut } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('kds');
   const {
@@ -111,7 +116,6 @@ export default function App() {
     const handleMenusApproved = (e) => {
       const timestamp = e.detail?.timestamp || Date.now();
       setLastMenusApprovedAt(timestamp);
-      console.log('[KDS] Menus approved signal received, timestamp:', timestamp);
     };
 
     // Listen for custom event
@@ -183,9 +187,6 @@ export default function App() {
         const result = await getUnapprovedMenuCountForWeek(selectedWeekId);
         setUnapprovedMenuCount(result.count);
         setUnapprovedByClient(result.byClient || {});
-        if (result.count > 0) {
-          console.log('[APPROVAL WARNING] weekId=', selectedWeekId, 'unapprovedCount=', result.count, 'byClient=', result.byClient);
-        }
       } catch (err) {
         console.error('[APPROVAL WARNING] Failed to fetch unapproved count:', err);
       }
@@ -200,7 +201,6 @@ export default function App() {
 
     try {
       await approveAllMenusForWeek(selectedWeekId);
-      console.log('[APPROVAL WARNING] cleared');
 
       // Refetch menus to update UI
       const freshMenus = await fetchMenusByWeek(selectedWeekId, false);
@@ -214,7 +214,7 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('menusApproved', { detail: { timestamp: Date.now() } }));
     } catch (err) {
       console.error('[APPROVAL WARNING] Failed to approve all:', err);
-      alert('Failed to approve menus: ' + err.message);
+      toast('Failed to approve menus: ' + err.message, 'error');
     }
   };
 
@@ -226,23 +226,22 @@ export default function App() {
       parseClientsCSV(
         file,
         (imported) => {
-          console.log('Parsed clients:', imported);
           if (imported.length === 0) {
-            alert('No subscriptions found in CSV. Please check the file format.\n\nExpected columns: Name, Display Name, Address, Email, Phone, Portions, Meals, etc.');
+            toast('No subscriptions found in CSV. Check the file format.', 'error');
             return;
           }
           const totalContacts = imported.reduce((sum, sub) => sum + (sub.contacts?.length || 0), 0);
           setClients(imported);
-          alert(`Import successful!\n\n${imported.length} subscription(s) imported\n${totalContacts} contact(s) total`);
+          toast(`Import successful: ${imported.length} subscription(s), ${totalContacts} contact(s)`, 'success');
         },
         (err) => {
           console.error('CSV parse error:', err);
-          alert('Error parsing CSV: ' + (err.message || err));
+          toast('Error parsing CSV: ' + (err.message || err), 'error');
         }
       );
     } catch (err) {
       console.error('Import error:', err);
-      alert('Error importing CSV: ' + err.message);
+      toast('Error importing CSV: ' + err.message, 'error');
     }
     e.target.value = '';
   };
@@ -254,13 +253,13 @@ export default function App() {
       file,
       (imported) => {
         if (imported.length === 0) {
-          alert('No ingredients found in CSV. Please check the file format.');
+          toast('No ingredients found in CSV. Check the file format.', 'error');
           return;
         }
         setMasterIngredients(imported);
-        alert(`Import successful!\n\n${imported.length} ingredient(s) imported`);
+        toast(`Import successful: ${imported.length} ingredient(s)`, 'success');
       },
-      (err) => alert('Error parsing CSV: ' + err.message)
+      (err) => toast('Error parsing CSV: ' + err.message, 'error')
     );
     e.target.value = '';
   };
@@ -273,14 +272,14 @@ export default function App() {
       (newRecipes, ingredientsToAdd) => {
         const recipeCount = Object.values(newRecipes).flat().length;
         if (recipeCount === 0) {
-          alert('No recipes found in CSV. Please check the file format.');
+          toast('No recipes found in CSV. Check the file format.', 'error');
           return;
         }
         setRecipes(newRecipes);
         ingredientsToAdd.forEach(ing => addToMasterIngredients(ing));
-        alert(`Import successful!\n\n${recipeCount} recipe(s) imported\n${ingredientsToAdd.length} ingredient(s) added to master list`);
+        toast(`Import successful: ${recipeCount} recipe(s), ${ingredientsToAdd.length} ingredient(s) added`, 'success');
       },
-      (err) => alert('Error parsing CSV: ' + err.message)
+      (err) => toast('Error parsing CSV: ' + err.message, 'error')
     );
     e.target.value = '';
   };
@@ -304,18 +303,14 @@ export default function App() {
 
   // Recipe functions
   const saveRecipe = async () => {
-    console.log('[App.saveRecipe] START');
-    console.log('[App.saveRecipe] dataMode:', getDataMode(), 'isSupabaseMode:', isSupabaseMode());
-    console.log('[App.saveRecipe] recipeName:', newRecipe?.name, 'category:', newRecipe?.category);
-
-    if (!newRecipe.name) { alert('Please enter a recipe name'); return; }
+    if (!newRecipe.name) { toast('Please enter a recipe name', 'warning'); return; }
     const validIngredients = newRecipe.ingredients.filter(ing => ing.name && ing.quantity);
-    if (validIngredients.length === 0) { alert('Please add at least one ingredient with name and quantity'); return; }
+    if (validIngredients.length === 0) { toast('Please add at least one ingredient with name and quantity', 'warning'); return; }
 
     // Check for duplicate ingredients
     const duplicates = findDuplicateIngredients(validIngredients);
     if (duplicates.length > 0) {
-      alert(`Error: ${duplicates.join(', ')} is entered twice. Please combine or remove duplicates.`);
+      toast(`Duplicate ingredient: ${duplicates.join(', ')}. Please combine or remove duplicates.`, 'warning');
       return;
     }
 
@@ -328,44 +323,34 @@ export default function App() {
     };
 
     if (isSupabaseMode()) {
-      console.log('[App.saveRecipe] calling saveRecipeToSupabase...');
       const result = await saveRecipeToSupabase(recipeToSave, newRecipe.category);
-      console.log('[App.saveRecipe] result:', result.success, result.error || '');
       if (result.success) {
         setRecipes(result.recipes);
         setNewRecipe(DEFAULT_NEW_RECIPE);
-        alert('Recipe saved!');
+        toast('Recipe saved!', 'success');
       } else {
-        alert(`Failed to save recipe: ${result.error}`);
+        toast(`Failed to save recipe: ${result.error}`, 'error');
       }
     } else {
-      console.log('[App.saveRecipe] LOCAL MODE - not calling Supabase');
       setRecipes({ ...recipes, [newRecipe.category]: [...recipes[newRecipe.category], recipeToSave] });
       setNewRecipe(DEFAULT_NEW_RECIPE);
-      alert('Recipe saved (local only)!');
+      toast('Recipe saved (local only)!', 'success');
     }
   };
 
   const deleteRecipe = async (category, index) => {
-    console.log('[App.deleteRecipe] START', category, index);
-    console.log('[App.deleteRecipe] dataMode:', getDataMode(), 'isSupabaseMode:', isSupabaseMode());
-
-    if (!window.confirm('Delete this recipe?')) return;
+    if (!(await confirm('Delete this recipe?'))) return;
 
     const recipe = recipes[category][index];
-    console.log('[App.deleteRecipe] recipe:', recipe?.name);
 
     if (isSupabaseMode()) {
-      console.log('[App.deleteRecipe] calling deleteRecipeFromSupabase...');
       const result = await deleteRecipeFromSupabase(recipe.name, category);
-      console.log('[App.deleteRecipe] result:', result.success, result.error || '');
       if (result.success) {
         setRecipes(result.recipes);
       } else {
-        alert(`Failed to delete recipe: ${result.error}`);
+        toast(`Failed to delete recipe: ${result.error}`, 'error');
       }
     } else {
-      console.log('[App.deleteRecipe] LOCAL MODE - not calling Supabase');
       setRecipes({ ...recipes, [category]: recipes[category].filter((_, i) => i !== index) });
     }
   };
@@ -395,7 +380,6 @@ export default function App() {
         );
         if (masterMatch && masterMatch.id) {
           ingredientId = masterMatch.id;
-          console.log('[startEditingRecipe] Backfilled ingredient_id for:', ing.name, '->', ingredientId);
         }
       }
 
@@ -466,18 +450,13 @@ export default function App() {
   };
 
   const saveEditingRecipe = async () => {
-    console.log('[App.saveEditingRecipe] START');
-    console.log('[App.saveEditingRecipe] dataMode:', getDataMode(), 'isSupabaseMode:', isSupabaseMode());
-
     const { category, index, recipe } = editingRecipe;
-    console.log('[App.saveEditingRecipe] recipe:', recipe?.name, 'category:', category);
-
     const validIngredients = recipe.ingredients.filter(ing => ing.name && ing.quantity);
 
     // Check for duplicate ingredients
     const duplicates = findDuplicateIngredients(validIngredients);
     if (duplicates.length > 0) {
-      alert(`Error: ${duplicates.join(', ')} is entered twice. Please combine or remove duplicates.`);
+      toast(`Duplicate ingredient: ${duplicates.join(', ')}. Please combine or remove duplicates.`, 'warning');
       return;
     }
 
@@ -486,41 +465,38 @@ export default function App() {
     const recipeToSave = { ...recipe, ingredients: validIngredients };
 
     if (isSupabaseMode()) {
-      console.log('[App.saveEditingRecipe] calling saveRecipeToSupabase...');
       const result = await saveRecipeToSupabase(recipeToSave, category);
       if (result.success) {
         setRecipes(result.recipes);
         setEditingRecipe(null);
-        alert('Recipe updated!');
+        toast('Recipe updated!', 'success');
       } else {
-        alert(`Failed to update recipe: ${result.error}`);
+        toast(`Failed to update recipe: ${result.error}`, 'error');
       }
     } else {
-      // Local mode - just update local state
-      console.log('[App.saveEditingRecipe] LOCAL MODE - not calling Supabase');
       const updatedRecipes = { ...recipes };
       updatedRecipes[category][index] = recipeToSave;
       setRecipes(updatedRecipes);
       setEditingRecipe(null);
-      alert('Recipe updated (local only)!');
+      toast('Recipe updated (local only)!', 'success');
     }
   };
 
   // Menu functions
   const addMenuItem = () => {
     if (!newMenuItem.protein && !newMenuItem.veg && !newMenuItem.starch && newMenuItem.extras.length === 0) {
-      alert('Please select at least one dish');
+      toast('Please select at least one dish', 'warning');
       return;
     }
     if (selectedClients.length === 0) {
-      alert('Please select at least one client');
+      toast('Please select at least one client', 'warning');
       return;
     }
     const newItems = selectedClients.map(clientName => {
       const client = clients.find(c => c.name === clientName);
       if (!client?.id) {
         console.error('[addMenuItem] Client missing id:', { clientName, client });
-        alert(`Cannot add menu for ${clientName}: client data is missing`);
+        toast(`Cannot add menu for ${clientName}: client data is missing`, 'error');
         return null;
       }
       const clientPortions = client.portions || client.persons || 1;
@@ -542,8 +518,8 @@ export default function App() {
 
   const deleteMenuItem = (id) => setMenuItems(menuItems.filter(item => item.id !== id));
 
-  const clearMenu = () => {
-    if (window.confirm('Clear all menu items?')) {
+  const clearMenu = async () => {
+    if (await confirm('Clear all menu items?')) {
       setMenuItems([]);
       setSelectedClients([]);
       setCompletedDishes({});
@@ -579,18 +555,18 @@ export default function App() {
       });
       return items;
     }
-    // Filter global menuItems to selected week
-    return menuItems.filter(item => getWeekIdFromDate(item.date) === selectedWeekId);
+    // Filter global menuItems to selected week — prefer stored week_id over date computation
+    return menuItems.filter(item => {
+      const storedWeekId = item.week_id || item.weekId;
+      if (storedWeekId) return storedWeekId === selectedWeekId;
+      return item.date ? getWeekIdFromDate(item.date) === selectedWeekId : false;
+    });
   };
 
   // Get approved menu items filtered to selected week
   const getWeekApprovedMenuItems = () => {
     const weekItems = getWeekMenuItems();
     const approved = weekItems.filter(item => item.approved);
-    console.log('[KDS Debug] selectedWeekId:', selectedWeekId);
-    console.log('[KDS Debug] Total menuItems:', menuItems.length);
-    console.log('[KDS Debug] Week menuItems:', weekItems.length);
-    console.log('[KDS Debug] Approved items:', approved.length, approved);
     return approved;
   };
 
@@ -648,13 +624,13 @@ export default function App() {
     if (isSupabaseMode()) {
       // Check if online first
       if (!isConfigured()) {
-        alert('Cannot mark complete: database not configured');
+        toast('Cannot mark complete: database not configured', 'error');
         return;
       }
 
       const isOnlineNow = await checkConnection();
       if (!isOnlineNow) {
-        alert('Cannot mark complete: database offline');
+        toast('Cannot mark complete: database offline', 'error');
         return;
       }
 
@@ -666,7 +642,7 @@ export default function App() {
       });
 
       if (!result.success) {
-        alert(`Cannot mark complete: ${result.error}`);
+        toast(`Cannot mark complete: ${result.error}`, 'error');
         return;
       }
 
@@ -701,8 +677,8 @@ export default function App() {
     return allDishNames.length > 0 && allDishNames.every(name => completedDishes[name]);
   };
 
-  const completeAllOrders = () => {
-    if (!window.confirm('Mark all orders complete and move to Ready for Delivery?')) return;
+  const completeAllOrders = async () => {
+    if (!(await confirm('Mark all orders complete and move to Ready for Delivery?'))) return;
     const ordersByClient = getOrdersByClient();
     const newReadyEntries = [];
 
@@ -744,7 +720,7 @@ export default function App() {
     setMenuItems([]);
     setCompletedDishes({});
     setSelectedClients([]);
-    alert('Orders ready for delivery!');
+    toast('Orders ready for delivery!', 'success');
   };
 
   // Shopping list - grouped by shopping day based on client delivery days
@@ -855,7 +831,6 @@ export default function App() {
   // Week-view shopping list - aggregates ALL ingredients into one list (no day split)
   // Used for export and week-level shopping view
   const getShoppingListForWeek = () => {
-    console.log('[WEEKLY SHOPPING] Building aggregated list...');
     const shoppingList = {};
     const approvedItems = getWeekApprovedMenuItems();
 
@@ -929,7 +904,6 @@ export default function App() {
       return a.name.localeCompare(b.name);
     });
 
-    console.log('[WEEKLY SHOPPING] Aggregated', result.length, 'unique ingredient rows from', approvedItems.length, 'approved menu items');
     return result;
   };
 
@@ -941,9 +915,7 @@ export default function App() {
 
   // Export uses WEEK aggregation (no duplicates across days)
   const exportPrepList = () => {
-    console.log('[EXPORT] Starting weekly shopping list export...');
     const prepList = getShoppingListForWeek();
-    console.log('[EXPORT] weekly shopping list rows:', prepList.length);
     downloadCSV(Papa.unparse(prepList.map(item => ({
       Source: item.source,
       Section: item.section,
@@ -951,7 +923,6 @@ export default function App() {
       Quantity: item.quantity.toFixed(2),
       Unit: item.unit
     })), { columns: ['Source', 'Section', 'Ingredient', 'Quantity', 'Unit'] }), 'shopping-list.csv');
-    console.log('[EXPORT] CSV download triggered');
   };
 
   // History
@@ -969,32 +940,44 @@ export default function App() {
 
   // Client functions
   const addClient = () => {
-    if (!newClient.name) { alert('Please enter a client name'); return; }
+    if (!newClient.name) { toast('Please enter a client name', 'warning'); return; }
     setClients([...clients, { ...newClient }]);
     setNewClient(DEFAULT_NEW_CLIENT);
-    alert('Client added!');
+    toast('Client added!', 'success');
   };
 
-  const deleteClient = (index) => {
-    if (window.confirm('Delete this client?')) {
+  const deleteClient = async (index) => {
+    const client = clients[index];
+    if (!client) return;
+    const clientLabel = client.displayName || client.name || 'this client';
+    if (!(await confirm(`Delete ${clientLabel}? This will permanently remove their menus, tasks, and billing records.`))) return;
+
+    if (isSupabaseMode() && client.id) {
+      const result = await deleteClientFromSupabase(client.id, client.name);
+      if (result.success) {
+        setClients(result.clients);
+      } else {
+        toast(`Delete failed: ${result.error}`, 'error');
+      }
+    } else {
       setClients(clients.filter((_, i) => i !== index));
     }
   };
 
   // Ingredient functions
-  const addMasterIngredient = () => {
-    if (!newIngredient.name) { alert('Please enter an ingredient name'); return; }
+  const addMasterIngredient = async () => {
+    if (!newIngredient.name) { toast('Please enter an ingredient name', 'warning'); return; }
     const similar = findSimilarIngredients(newIngredient.name);
     const exact = findExactMatch(newIngredient.name);
-    if (exact) { alert(`"${newIngredient.name}" already exists as "${exact.name}"`); return; }
-    if (similar.length > 0 && !window.confirm(`Similar ingredients found: ${similar.map(s => s.name).join(', ')}\n\nAdd "${newIngredient.name}" anyway?`)) return;
+    if (exact) { toast(`"${newIngredient.name}" already exists as "${exact.name}"`, 'warning'); return; }
+    if (similar.length > 0 && !(await confirm(`Similar ingredients found: ${similar.map(s => s.name).join(', ')}\n\nAdd "${newIngredient.name}" anyway?`))) return;
     setMasterIngredients([...masterIngredients, { ...newIngredient, id: Date.now() }]);
     setNewIngredient(DEFAULT_NEW_INGREDIENT);
-    alert('Ingredient added!');
+    toast('Ingredient added!', 'success');
   };
 
-  const deleteMasterIngredient = (id) => {
-    if (window.confirm('Delete this ingredient?')) {
+  const deleteMasterIngredient = async (id) => {
+    if (await confirm('Delete this ingredient?')) {
       setMasterIngredients(masterIngredients.filter(ing => ing.id !== id));
     }
   };
@@ -1075,6 +1058,14 @@ export default function App() {
               <Settings size={20} />
               Admin
             </Link>
+            {isConfigured() && (
+              <button
+                onClick={async () => { await signOut(); navigate('/login'); }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors text-sm"
+              >
+                Sign out
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -1109,94 +1100,102 @@ export default function App() {
         )}
 
         {activeTab === 'recipes' && (
-          <RecipesTab
-            recipes={recipes}
-            newRecipe={newRecipe}
-            setNewRecipe={setNewRecipe}
-            editingRecipe={editingRecipe}
-            setEditingRecipe={setEditingRecipe}
-            masterIngredients={masterIngredients}
-            recipesFileRef={recipesFileRef}
-            findExactMatch={findExactMatch}
-            findSimilarIngredients={findSimilarIngredients}
-            getRecipeCost={getRecipeCost}
-            getRecipeCounts={getRecipeCounts}
-            saveRecipe={saveRecipe}
-            deleteRecipe={deleteRecipe}
-            startEditingRecipe={startEditingRecipe}
-            saveEditingRecipe={saveEditingRecipe}
-            updateEditingIngredient={updateEditingIngredient}
-            addEditingIngredient={addEditingIngredient}
-            removeEditingIngredient={removeEditingIngredient}
-            exportRecipesCSV={() => exportRecipesCSV(recipes)}
-            getUniqueVendors={getUniqueVendors}
-            updateMasterIngredientCost={updateMasterIngredientCost}
-            syncRecipeIngredientsFromMaster={syncRecipeIngredientsFromMaster}
-            units={units}
-            addUnit={addUnit}
-            duplicateRecipe={duplicateRecipe}
-          />
+          <ErrorBoundary inline label="Recipes">
+            <RecipesTab
+              recipes={recipes}
+              newRecipe={newRecipe}
+              setNewRecipe={setNewRecipe}
+              editingRecipe={editingRecipe}
+              setEditingRecipe={setEditingRecipe}
+              masterIngredients={masterIngredients}
+              recipesFileRef={recipesFileRef}
+              findExactMatch={findExactMatch}
+              findSimilarIngredients={findSimilarIngredients}
+              getRecipeCost={getRecipeCost}
+              getRecipeCounts={getRecipeCounts}
+              saveRecipe={saveRecipe}
+              deleteRecipe={deleteRecipe}
+              startEditingRecipe={startEditingRecipe}
+              saveEditingRecipe={saveEditingRecipe}
+              updateEditingIngredient={updateEditingIngredient}
+              addEditingIngredient={addEditingIngredient}
+              removeEditingIngredient={removeEditingIngredient}
+              exportRecipesCSV={() => exportRecipesCSV(recipes)}
+              getUniqueVendors={getUniqueVendors}
+              updateMasterIngredientCost={updateMasterIngredientCost}
+              syncRecipeIngredientsFromMaster={syncRecipeIngredientsFromMaster}
+              units={units}
+              addUnit={addUnit}
+              duplicateRecipe={duplicateRecipe}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'kds' && (
-          <KDSTab
-            menuItems={getApprovedMenuItems()}
-            recipes={recipes}
-            completedDishes={completedDishes}
-            toggleDishComplete={toggleDishComplete}
-            allDishesComplete={allDishesComplete}
-            completeAllOrders={completeAllOrders}
-            getKDSView={getKDSView}
-            selectedWeekId={selectedWeekId}
-            currentWeek={currentWeek}
-            kdsLoading={kdsLoading}
-            kdsLastRefresh={kdsLastRefresh}
-            lastMenusApprovedAt={lastMenusApprovedAt}
-            isSyncing={isSyncing}
-            unapprovedMenuCount={unapprovedMenuCount}
-            unapprovedByClient={unapprovedByClient}
-            onApproveAll={handleApproveAllFromWarning}
-          />
+          <ErrorBoundary inline label="Kitchen Display">
+            <KDSTab
+              menuItems={getApprovedMenuItems()}
+              recipes={recipes}
+              completedDishes={completedDishes}
+              toggleDishComplete={toggleDishComplete}
+              allDishesComplete={allDishesComplete}
+              completeAllOrders={completeAllOrders}
+              getKDSView={getKDSView}
+              selectedWeekId={selectedWeekId}
+              currentWeek={currentWeek}
+              kdsLoading={kdsLoading}
+              kdsLastRefresh={kdsLastRefresh}
+              lastMenusApprovedAt={lastMenusApprovedAt}
+              isSyncing={isSyncing}
+              unapprovedMenuCount={unapprovedMenuCount}
+              unapprovedByClient={unapprovedByClient}
+              onApproveAll={handleApproveAllFromWarning}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'prep' && (
-          <PrepTab
-            prepList={prepList}
-            shoppingListsByDay={getShoppingListsByDay()}
-            exportPrepList={exportPrepList}
-            selectedWeekId={selectedWeekId}
-            unapprovedMenuCount={unapprovedMenuCount}
-            unapprovedByClient={unapprovedByClient}
-          />
+          <ErrorBoundary inline label="Prep">
+            <PrepTab
+              prepList={prepList}
+              shoppingListsByDay={getShoppingListsByDay()}
+              exportPrepList={exportPrepList}
+              selectedWeekId={selectedWeekId}
+              unapprovedMenuCount={unapprovedMenuCount}
+              unapprovedByClient={unapprovedByClient}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'deliveries' && (
-          <DeliveriesTab
-            clients={clients}
-            drivers={drivers}
-            setDrivers={setDrivers}
-            newDriver={newDriver}
-            setNewDriver={setNewDriver}
-            deliveryLog={getWeekDeliveryLog()}
-            setDeliveryLog={setDeliveryLog}
-            bagReminders={bagReminders}
-            setBagReminders={setBagReminders}
-            readyForDelivery={getWeekReadyForDelivery()}
-            setReadyForDelivery={setReadyForDelivery}
-            orderHistory={orderHistory}
-            setOrderHistory={setOrderHistory}
-            selectedWeekId={selectedWeekId}
-            weeks={weeks}
-            addDeliveryLogToWeek={addDeliveryLogToWeek}
-            removeReadyForDeliveryFromWeek={removeReadyForDeliveryFromWeek}
-            isReadOnly={isCurrentWeekReadOnly}
-            menuItems={getWeekMenuItems()}
-            clientPortalData={clientPortalData}
-            saveDriverRoutes={saveDriverRoutes}
-            unapprovedMenuCount={unapprovedMenuCount}
-            unapprovedByClient={unapprovedByClient}
-            onApproveAll={handleApproveAllFromWarning}
-          />
+          <ErrorBoundary inline label="Deliveries">
+            <DeliveriesTab
+              clients={clients}
+              drivers={drivers}
+              setDrivers={setDrivers}
+              newDriver={newDriver}
+              setNewDriver={setNewDriver}
+              deliveryLog={getWeekDeliveryLog()}
+              setDeliveryLog={setDeliveryLog}
+              bagReminders={bagReminders}
+              setBagReminders={setBagReminders}
+              readyForDelivery={getWeekReadyForDelivery()}
+              setReadyForDelivery={setReadyForDelivery}
+              orderHistory={orderHistory}
+              setOrderHistory={setOrderHistory}
+              selectedWeekId={selectedWeekId}
+              weeks={weeks}
+              addDeliveryLogToWeek={addDeliveryLogToWeek}
+              removeReadyForDeliveryFromWeek={removeReadyForDeliveryFromWeek}
+              isReadOnly={isCurrentWeekReadOnly}
+              menuItems={getWeekMenuItems()}
+              clientPortalData={clientPortalData}
+              saveDriverRoutes={saveDriverRoutes}
+              unapprovedMenuCount={unapprovedMenuCount}
+              unapprovedByClient={unapprovedByClient}
+              onApproveAll={handleApproveAllFromWarning}
+            />
+          </ErrorBoundary>
         )}
 
       </div>

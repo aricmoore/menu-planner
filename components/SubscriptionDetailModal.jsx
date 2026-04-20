@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar, DollarSign, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { useNotification } from './NotificationContext';
 
 export default function SubscriptionDetailModal({
   client,
@@ -7,6 +8,7 @@ export default function SubscriptionDetailModal({
   onSave,
   onClose
 }) {
+  const { toast } = useNotification();
   const [deliveryDates, setDeliveryDates] = useState(client?.deliveryDates || []);
   const [billDueDate, setBillDueDate] = useState(client?.billDueDate || '');
   const [newDate, setNewDate] = useState('');
@@ -28,11 +30,11 @@ export default function SubscriptionDetailModal({
   const addDate = () => {
     if (!newDate) return;
     if (deliveryDates.includes(newDate)) {
-      alert('This date is already added');
+      toast('This date is already added', 'warning');
       return;
     }
     if (deliveryDates.length >= 4) {
-      alert('Maximum 4 delivery dates allowed');
+      toast('Maximum 4 delivery dates allowed', 'warning');
       return;
     }
     const sorted = [...deliveryDates, newDate].sort();

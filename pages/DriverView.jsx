@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNotification } from '../components/NotificationContext';
 import { useSearchParams } from 'react-router-dom';
 import {
   Truck, MapPin, Camera, AlertTriangle, Check, ChevronLeft,
@@ -41,6 +42,7 @@ const DELIVERY_STATUS = {
 };
 
 export default function DriverView() {
+  const { toast } = useNotification();
   const [searchParams] = useSearchParams();
   const {
     drivers,
@@ -354,14 +356,6 @@ export default function DriverView() {
     // Normalize input (trim whitespace, lowercase)
     const code = (accessCode || "").trim().toLowerCase();
 
-    // Debug log for mobile issues
-    console.log("[LOGIN DEBUG]", {
-      rawInput: accessCode,
-      normalized: code,
-      driversLen: drivers?.length,
-      driverCodes: drivers.map(d => d.accessCode || d.access_code)
-    });
-
     // Find driver with normalized matching
     const foundDriver = drivers.find(d => {
       const driverCode = (d.accessCode || d.access_code || "").trim().toLowerCase();
@@ -418,13 +412,13 @@ export default function DriverView() {
 
     // Validate porch drop requires photo
     if (handoffType === HANDOFF_TYPES.PORCH && !photo && !problem) {
-      alert('Photo is required for porch drops');
+      toast('Photo is required for porch drops', 'warning');
       return;
     }
 
     // Validate "Other" problem requires note
     if (problem === 'Other' && !note.trim()) {
-      alert('Please provide details for "Other" problem');
+      toast('Please provide details for "Other" problem', 'warning');
       return;
     }
 
@@ -447,7 +441,7 @@ export default function DriverView() {
 
     const stopResult = await upsertDeliveryStop(stopPayload);
     if (!stopResult.success) {
-      alert(`Failed to save delivery: ${stopResult.error}`);
+      toast(`Failed to save delivery: ${stopResult.error}`, 'error');
       return;
     }
 
@@ -519,7 +513,7 @@ export default function DriverView() {
 
   const handleProblemSubmit = () => {
     if (!selectedProblem) {
-      alert('Please select a problem type');
+      toast('Please select a problem type', 'warning');
       return;
     }
     handleCompleteDelivery(selectedProblem, problemNote);
@@ -714,7 +708,6 @@ export default function DriverView() {
                   deliveryEntry={deliveryEntry}
                   onNavigate={openMaps}
                   onDeliver={(s) => {
-                    console.log("[STOP CLICKED]", s.clientName);
                     setShowAllStops(false);
                     setActiveOrder({
                       clientName: s.clientName,
@@ -830,7 +823,6 @@ export default function DriverView() {
                           stop={clientStop}
                           onNavigate={openMaps}
                           onDeliver={(stop) => {
-                            console.log("[STOP CLICKED]", stop.clientName);
                             setShowAllReady(false);
                             setActiveOrder({
                               clientName: stop.clientName,

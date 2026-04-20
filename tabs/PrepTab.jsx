@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNotification } from '../components/NotificationContext';
 import { Download, Trash2, Check, Plus, ChevronRight, X, RefreshCw, MoveRight, FolderOpen, GripVertical } from 'lucide-react';
 import { isSupabaseMode } from '../lib/dataMode';
 import { saveAppSetting } from '../lib/database';
@@ -33,6 +34,7 @@ const STANDARD_SOURCES = [
 ];
 
 export default function PrepTab({ prepList, shoppingListsByDay = {}, exportPrepList, selectedWeekId, unapprovedMenuCount = 0, unapprovedByClient = {} }) {
+  const { toast, confirm } = useNotification();
   // Shopping list state (loaded from Supabase, saved on change)
   const [checkedItems, setCheckedItems] = useState({});
   const [manualItems, setManualItems] = useState({ Sunday: [], Tuesday: [], Thursday: [] });
@@ -87,7 +89,7 @@ export default function PrepTab({ prepList, shoppingListsByDay = {}, exportPrepL
       });
     } catch (err) {
       console.error('[PrepTab] Failed to save shopping list state:', err);
-      alert(`Failed to save shopping list: ${err.message}`);
+      toast(`Failed to save shopping list: ${err.message}`, 'error');
     }
   }, [selectedWeekId, checkedItems, manualItems, itemOverrides, isLoaded]);
 
@@ -363,8 +365,8 @@ export default function PrepTab({ prepList, shoppingListsByDay = {}, exportPrepL
     });
   };
 
-  const clearAllChecks = () => {
-    if (window.confirm('Clear all checked items?')) {
+  const clearAllChecks = async () => {
+    if (await confirm('Clear all checked items?')) {
       setCheckedItems({});
     }
   };
@@ -408,8 +410,7 @@ export default function PrepTab({ prepList, shoppingListsByDay = {}, exportPrepL
   const handleExport = () => {
     if (unapprovedMenuCount > 0) {
       const topClients = Object.entries(unapprovedByClient).slice(0, 3).map(([name, count]) => `${name} (${count})`).join(', ');
-      console.log('[PRINT BLOCKED]', { weekId: selectedWeekId, unapprovedMenuCount, unapprovedByClient });
-      alert(`Cannot export yet: ${unapprovedMenuCount} unapproved menu(s).\n\nClients: ${topClients}\n\nApprove all menus first.`);
+      toast(`Cannot export yet: ${unapprovedMenuCount} unapproved menu(s). Clients: ${topClients}. Approve all menus first.`, 'warning');
       return;
     }
     exportPrepList();

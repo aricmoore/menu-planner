@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { isConfigured, checkConnection } from '../lib/supabase';
 import { fetchClients, saveClientPortalData as savePortalDataToSupabase } from '../lib/database';
+import { useNotification } from '../components/NotificationContext';
 
 export function useClientPortalData() {
+  const { toast } = useNotification();
   const [clients, setClients] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [readyForDelivery, setReadyForDelivery] = useState([]);
@@ -18,14 +20,12 @@ export function useClientPortalData() {
     const loadData = async () => {
       // Always attempt Supabase if configured (mode is now automatic)
       if (!isConfigured()) {
-        console.log('[ClientPortalData] Supabase not configured');
         setIsLoaded(true);
         return;
       }
 
       const online = await checkConnection();
       if (!online) {
-        console.log('[ClientPortalData] offline');
         setIsLoaded(true);
         return;
       }
@@ -71,7 +71,7 @@ export function useClientPortalData() {
         await savePortalDataToSupabase(clientId, updated[clientId]);
       } catch (err) {
         console.error('[ClientPortalData] Error saving to Supabase:', err);
-        alert(`Failed to save: ${err.message}`);
+        toast(`Failed to save: ${err.message}`, 'error');
       }
     }
   }, [clientPortalData]);

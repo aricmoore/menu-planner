@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNotification } from '../components/NotificationContext';
 import { MapPin, Clock, ExternalLink, GripVertical, Truck, Activity, FileText, Check, AlertTriangle, User, Phone, ShoppingBag, Bell, Calendar, Plus, Trash2, Edit2, X, Car, Save, Navigation, Eye, EyeOff } from 'lucide-react';
 import { ZONES, DAYS, DELIVERY_PROBLEMS, DEFAULT_NEW_DRIVER } from '../constants';
 import { isConfigured } from '../lib/supabase';
@@ -79,9 +80,7 @@ export default function DeliveriesTab({
   unapprovedByClient = {},
   onApproveAll = null
 }) {
-  // ============ DEBUG FLAG (set to true to enable console logging) ============
-  const enableDebug = false;
-
+  const { toast, confirm } = useNotification();
   // ============ DERIVED VALUES FROM PROPS ============
   // Derive monday from weeks/selectedWeekId (source of truth from props)
   const monday = weeks?.[selectedWeekId]?.dates?.monday || null;
@@ -100,16 +99,6 @@ export default function DeliveriesTab({
   // Toggle for showing "No Menu" clients (default: HIDE)
   const [showNoMenuClients, setShowNoMenuClients] = useState(false);
 
-  // ============ ONE-TIME DEBUG LOG ON WEEK CHANGE ============
-  useEffect(() => {
-    if (enableDebug) {
-      console.log('[DeliveriesTab] weekChange:', {
-        selectedWeekId,
-        approvedMenusCount: approvedStopKeys.size,
-        approvedStopKeysCount: approvedStopKeys.size
-      });
-    }
-  }, [selectedWeekId, approvedStopKeys.size]);
 
   // ============ FETCH DELIVERY STOPS (depends only on selectedWeekId) ============
   useEffect(() => {
@@ -210,7 +199,7 @@ export default function DeliveriesTab({
         setSavedRoutes(routes);
       } catch (err) {
         console.error('[DeliveriesTab] failed to load routes:', err);
-        alert(`Failed to load saved routes: ${err.message}`);
+        toast(`Failed to load saved routes: ${err.message}`, 'error');
       } finally {
         setIsLoadingRoutes(false);
       }
@@ -258,7 +247,7 @@ export default function DeliveriesTab({
         await saveRouteOrder(newOrder);
       } catch (err) {
         console.error('[DeliveriesTab] failed to save route order:', err);
-        alert(`Failed to save route order: ${err.message}`);
+        toast(`Failed to save route order: ${err.message}`, 'error');
       }
     }
   };
@@ -300,7 +289,7 @@ export default function DeliveriesTab({
         await saveStartingAddress(value);
       } catch (err) {
         console.error('[DeliveriesTab] failed to save starting address:', err);
-        alert(`Failed to save starting address: ${err.message}`);
+        toast(`Failed to save starting address: ${err.message}`, 'error');
       }
     }
   };
@@ -463,7 +452,7 @@ export default function DeliveriesTab({
 
     const stopResult = await upsertDeliveryStop(stopPayload);
     if (!stopResult.success) {
-      alert(`Failed to save delivery: ${stopResult.error}`);
+      toast(`Failed to save delivery: ${stopResult.error}`, 'error');
       return;
     }
 
@@ -747,7 +736,7 @@ export default function DeliveriesTab({
     }
 
     if (addresses.length === 0) {
-      alert('No addresses found for this zone');
+      toast('No addresses found for this zone', 'warning');
       return;
     }
     window.open(`https://www.google.com/maps/dir/${addresses.join('/')}`, '_blank');
@@ -1568,13 +1557,13 @@ export default function DeliveriesTab({
           const routableStops = (stops || []).filter(s => s.isRoutable);
 
           if (routableStops.length === 0) {
-            alert('No clients with approved menus in this zone.');
+            toast('No clients with approved menus in this zone.', 'warning');
             return;
           }
 
           const driver = drivers.find(d => d.zone === zone);
           if (!driver) {
-            alert(`No driver assigned to zone "${zone}". Please assign a driver first.`);
+            toast(`No driver assigned to zone "${zone}". Please assign a driver first.`, 'warning');
             return;
           }
 
@@ -1602,10 +1591,10 @@ export default function DeliveriesTab({
               driver_name: driver.name
             });
 
-            alert(`Route saved for ${driver?.name || "UNASSIGNED"} on ${date}!\n${routableStops.length} stop(s) scheduled.`);
+            toast(`Route saved for ${driver?.name || 'UNASSIGNED'} on ${date}: ${routableStops.length} stop(s) scheduled.`, 'success');
           } catch (err) {
             console.error('[SaveRoute] error:', err);
-            alert(`Failed to save route: ${err.message}`);
+            toast(`Failed to save route: ${err.message}`, 'error');
           }
         };
 
@@ -1622,7 +1611,7 @@ export default function DeliveriesTab({
           }
 
           if (addresses.length === 0) {
-            alert('No addresses found for this zone');
+            toast('No addresses found for this zone', 'warning');
             return;
           }
           window.open(`https://www.google.com/maps/dir/${addresses.join('/')}`, '_blank');
@@ -1831,8 +1820,6 @@ export default function DeliveriesTab({
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => {
-                                    alert('SAVE ROUTE clicked');
-  console.log('[BUTTON CLICK]');
   saveRouteForDay(day.date, zone, zoneClients);
 }}
                                   disabled={routableCount === 0}
@@ -1872,7 +1859,7 @@ export default function DeliveriesTab({
       {activeView === 'drivers' && (() => {
         const addDriver = async () => {
           if (!localNewDriver.name) {
-            alert('Please enter a driver name');
+            toast('Please enter a driver name', 'warning');
             return;
           }
 
@@ -1883,7 +1870,7 @@ export default function DeliveriesTab({
               setLocalNewDriver({ ...DEFAULT_NEW_DRIVER });
               if (setNewDriver) setNewDriver({ ...DEFAULT_NEW_DRIVER });
             } else {
-              alert(`Save failed: ${result.error}`);
+              toast(`Save failed: ${result.error}`, 'error');
             }
           } else if (setDrivers) {
             setDrivers([...drivers, { ...localNewDriver, id: `temp-${Date.now()}` }]);
@@ -1893,7 +1880,7 @@ export default function DeliveriesTab({
         };
 
         const deleteDriver = async (index) => {
-          if (!window.confirm('Delete this driver?')) return;
+          if (!(await confirm('Delete this driver?'))) return;
 
           const driver = drivers[index];
 
@@ -1902,7 +1889,7 @@ export default function DeliveriesTab({
             if (result.success) {
               setDrivers(result.drivers);
             } else {
-              alert(`Delete failed: ${result.error}`);
+              toast(`Delete failed: ${result.error}`, 'error');
             }
           } else if (setDrivers) {
             setDrivers(drivers.filter((_, i) => i !== index));
@@ -1927,7 +1914,7 @@ export default function DeliveriesTab({
               setEditingDriverIndex(null);
               setEditingDriver(null);
             } else {
-              alert(`Save failed: ${result.error}`);
+              toast(`Save failed: ${result.error}`, 'error');
             }
           } else if (setDrivers) {
             const updated = [...drivers];

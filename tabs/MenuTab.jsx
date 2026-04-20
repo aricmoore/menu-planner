@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useNotification } from '../components/NotificationContext';
 import { Plus, Trash2, Check, AlertTriangle, Circle, Eye, X, ChevronDown, ChevronUp, Edit2, Printer, Calendar, Utensils } from 'lucide-react';
 import WeekSelector from '../components/WeekSelector';
 import { getWeekIdFromDate, getWeekStartDate, getWeekEndDate } from '../utils/weekUtils';
@@ -207,20 +208,6 @@ export default function MenuTab({
   lockWeekAndSnapshot,
   unlockWeekById
 }) {
-  // Debug logging - top of render
-  console.log('[MenuTab] render', { selectedWeekId, menuItemsLength: menuItems?.length });
-  console.log('[MenuTab] menuItems source', { menuItemsLength: menuItems?.length, menuItemsSample: menuItems?.slice?.(0, 2) });
-
-  // Log each menuItem's weekId for debugging
-  if (menuItems?.length > 0) {
-    console.log('[MenuTab] menuItems weekIds:', menuItems.map(item => ({
-      clientName: item.clientName,
-      date: item.date,
-      weekId: item.weekId,
-      computedWeekId: item.date ? getWeekIdFromDate(item.date) : 'no date'
-    })).slice(0, 5));
-  }
-
   // Track renders without selectedWeekId
   const renderCountWithoutWeekRef = useRef(0);
   if (!selectedWeekId) {
@@ -258,7 +245,6 @@ export default function MenuTab({
     }
     if (menuItems && menuItems.length >= 0) {
       setIsDirty(true);
-      console.log('[MenuAutoSave] dirty=true week=' + selectedWeekId);
     }
   }, [menuItems, selectedWeekId]);
 
@@ -268,15 +254,12 @@ export default function MenuTab({
     const currentWeekId = selectedWeekIdRef.current;
 
     if (!isSupabaseMode()) {
-      console.log('[MenuAutoSave] skipped - local mode');
       return;
     }
     if (!currentWeekId) {
-      console.log('[MenuAutoSave] skipped - no week selected');
       return;
     }
     if (!currentMenuItems || currentMenuItems.length === 0) {
-      console.log('[MenuAutoSave] skipped - no menu items');
       return;
     }
 
@@ -287,11 +270,9 @@ export default function MenuTab({
     });
 
     if (weekItems.length === 0) {
-      console.log('[MenuAutoSave] skipped - no items for this week');
       return;
     }
 
-    console.log('[MenuAutoSave] saving...', weekItems.length, 'items');
     try {
       // Ensure weeks exist first
       const weekIds = [...new Set(weekItems.map(item => {
@@ -301,7 +282,6 @@ export default function MenuTab({
 
       await ensureWeeksExist(weekIds);
       await saveAllMenus(weekItems);
-      console.log('[MenuAutoSave] done');
     } catch (error) {
       console.error('[MenuAutoSave] failed:', error);
     }
@@ -311,7 +291,6 @@ export default function MenuTab({
   useEffect(() => {
     return () => {
       if (isDirty && isSupabaseMode() && selectedWeekIdRef.current) {
-        console.log('[MenuAutoSave] unmount - triggering save');
         performAutoSave();
       }
     };
@@ -321,7 +300,6 @@ export default function MenuTab({
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isDirty && isSupabaseMode() && selectedWeekIdRef.current) {
-        console.log('[MenuAutoSave] beforeunload - triggering save');
         performAutoSave();
       }
     };
@@ -356,6 +334,33 @@ export default function MenuTab({
       });
     });
   }, [allClients, clients, selectedWeekId]);
+
+  // Filter menu items to only show items for the selected week
+  // Prefer stored week_id (from DB) over computing from date
+  const weekMenuItems = menuItems.filter(item => {
+    const storedWeekId = item.week_id || item.weekId;
+    if (storedWeekId) return storedWeekId === selectedWeekId;
+    const computedWeekId = item.date ? getWeekIdFromDate(item.date) : null;
+    return computedWeekId === selectedWeekId;
+  });
+
+  // Clients that have menus for this week but no delivery date set — they won't appear
+  // in activeClients and would otherwise be invisible to the admin.
+  const orphanedMenuClients = useMemo(() => {
+    const activeNames = new Set(activeClients.map(c => c.displayName || c.name));
+    const seen = new Set();
+    const orphaned = [];
+    weekMenuItems.forEach(item => {
+      if (!activeNames.has(item.clientName) && !seen.has(item.clientName)) {
+        seen.add(item.clientName);
+        const client = (allClients || clients || []).find(
+          c => (c.displayName || c.name) === item.clientName
+        );
+        orphaned.push({ name: item.clientName, client });
+      }
+    });
+    return orphaned;
+  }, [weekMenuItems, activeClients, allClients, clients]);
 
   // Calculate delivery dates for the selected week
   const weekDeliveryDates = useMemo(() => {
@@ -421,48 +426,6 @@ export default function MenuTab({
     });
     return grouped;
   }, [scheduledClients, weekDeliveryDates]);
-
-  // Filter menu items to only show items for the selected week
-  // Use stored week_id (snake_case from DB) or weekId (camelCase from transform) as source of truth
-  // Only fall back to computed-from-date if both are null/undefined
-  const weekMenuItems = menuItems.filter(item => {
-    // Check both snake_case (raw DB) and camelCase (transformed)
-    const storedWeekId = item.week_id || item.weekId;
-    if (storedWeekId) {
-      return storedWeekId === selectedWeekId;
-    }
-    // Fallback: compute from date only if week_id is null/undefined
-    const computedWeekId = item.date ? getWeekIdFromDate(item.date) : null;
-    return computedWeekId === selectedWeekId;
-  });
-
-  // STYLED MENUS DEBUG - log filtering with all methods for comparison
-  const countByWeekIdSnake = menuItems.filter(item => item.week_id === selectedWeekId).length;
-  const countByWeekIdCamel = menuItems.filter(item => item.weekId === selectedWeekId).length;
-  const countByComputedWeek = menuItems.filter(item => {
-    const computed = item.date ? getWeekIdFromDate(item.date) : null;
-    return computed === selectedWeekId;
-  }).length;
-
-  console.log('[StyledMenus] filter debug', {
-    selectedWeekId,
-    menuItemsLength: menuItems?.length,
-    matchByWeekId_snake: countByWeekIdSnake,
-    matchByWeekId_camel: countByWeekIdCamel,
-    matchByComputedWeek: countByComputedWeek,
-    finalCount: weekMenuItems?.length
-  });
-
-  // Log first 5 items with their week_id values
-  if (menuItems?.length > 0) {
-    console.log('[StyledMenus] first 5 items:', menuItems.slice(0, 5).map(item => ({
-      week_id: item.week_id,
-      weekId: item.weekId,
-      date: item.date,
-      computedWeekId: item.date ? getWeekIdFromDate(item.date) : null,
-      clientName: item.clientName
-    })));
-  }
 
   // Get week start date (Monday)
   const getWeekStart = () => {
@@ -545,34 +508,19 @@ export default function MenuTab({
     return grouped;
   };
 
-  // State for approval toast messages
-  const [approvalToast, setApprovalToast] = useState(null);
-
-  // Show toast helper
-  const showToast = (message, type = 'info') => {
-    setApprovalToast({ message, type });
-    setTimeout(() => setApprovalToast(null), 4000);
-  };
+  const { toast: showToast, confirm } = useNotification();
 
   // Approve menu for a client
   const approveClientMenu = async (clientName) => {
-    console.log('[MenuTab] === APPROVE START ===');
-    console.log('[MenuTab] Approving menu for:', clientName);
-    console.log('[MenuTab] Current data mode:', isSupabaseMode() ? 'SUPABASE' : 'LOCAL');
-
     // Get current menu items for this client
     const currentMenuItems = menuItems.filter(item => item.clientName === clientName);
     const approvedItems = currentMenuItems.map(item => ({ ...item, approved: true }));
-    console.log('[MenuTab] Items to approve:', approvedItems.length);
 
     // Check if we should persist to Supabase BEFORE updating UI
     const supabaseMode = isSupabaseMode();
-    console.log('[MenuTab] isSupabaseMode() returned:', supabaseMode);
 
     if (supabaseMode) {
-      console.log('[MenuTab] Checking Supabase connection...');
       const isOnline = await checkConnection();
-      console.log('[MenuTab] checkConnection() returned:', isOnline);
 
       if (!isOnline) {
         console.error('[MenuTab] Cannot persist: database offline');
@@ -595,31 +543,19 @@ export default function MenuTab({
           return `${year}-W${String(weekNum).padStart(2, '0')}`;
         }).filter(Boolean);
 
-        console.log('[MenuTab] Ensuring weeks exist:', [...new Set(weekIds)]);
         const weeksResult = await ensureWeeksExist(weekIds);
         if (!weeksResult.success) {
           console.error('[MenuTab] ❌ Failed to create weeks:', weeksResult.errors);
           showToast(`Failed to create week records: ${weeksResult.errors.join(', ')}`, 'error');
           return;
         }
-        if (weeksResult.created.length > 0) {
-          console.log('[MenuTab] Created weeks:', weeksResult.created);
-        }
 
         const menuWeekId = approvedItems[0]?.weekId || getWeekIdFromDate(approvedItems[0]?.date);
-        console.log('[StyledMenus] save start', {
-          count: approvedItems.length,
-          clientName,
-          weekId: menuWeekId
-        });
         await saveAllMenus(approvedItems);
-        console.log('[StyledMenus] save success', { savedCount: approvedItems.length });
 
         // Sync delivery stops for this week (creates MENU_PLANNED stops)
         if (menuWeekId) {
-          console.log('[StyledMenus] syncing delivery stops for week:', menuWeekId);
-          const syncResult = await syncDeliveryStopsForWeek(menuWeekId);
-          console.log('[StyledMenus] delivery stops sync result:', syncResult);
+          await syncDeliveryStopsForWeek(menuWeekId);
         }
 
         setIsDirty(false); // Reset dirty flag after successful save
@@ -629,14 +565,12 @@ export default function MenuTab({
           const updated = prev.map(item =>
             item.clientName === clientName ? { ...item, approved: true } : item
           );
-          console.log('[MenuTab] Local state updated after DB success');
           return updated;
         });
 
         // Refetch to sync state with DB
         try {
           const freshMenus = await fetchMenus();
-          console.log('[MenuTab] Refetched menus from Supabase, count:', freshMenus.length);
           setMenuItems(prev => {
             const dbIds = new Set(freshMenus.map(m => `${m.clientName}-${m.date}`));
             const localOnly = prev.filter(item => !dbIds.has(`${item.clientName}-${item.date}`));
@@ -661,7 +595,6 @@ export default function MenuTab({
       }
     } else {
       // Local mode - just update local state
-      console.log('[MenuTab] Local mode - updating local state only');
       setMenuItems(prev => prev.map(item =>
         item.clientName === clientName ? { ...item, approved: true } : item
       ));
@@ -674,8 +607,6 @@ export default function MenuTab({
 
   // Approve ALL menus for the week - database-driven, no UI filtering
   const approveAllReady = async () => {
-    console.log('[APPROVE ALL CLICKED] weekId:', selectedWeekId);
-
     // Check Supabase connectivity
     if (isSupabaseMode()) {
       const isOnline = await checkConnection();
@@ -687,7 +618,6 @@ export default function MenuTab({
       try {
         // Approve all unapproved menus for this week directly in database
         const result = await approveAllMenusForWeek(selectedWeekId);
-        console.log('[APPROVE ALL] Database updated:', result.updated, 'rows');
 
         // Refetch menus from database to sync UI state
         const freshMenus = await fetchMenusByWeek(selectedWeekId, false);
@@ -723,8 +653,8 @@ export default function MenuTab({
   };
 
   // Deny (remove) menu for a client
-  const denyClientMenu = (clientName) => {
-    if (window.confirm(`Remove all menu items for ${clientName}?`)) {
+  const denyClientMenu = async (clientName) => {
+    if (await confirm(`Remove all menu items for ${clientName}?`)) {
       setMenuItems(prev => prev.filter(item => item.clientName !== clientName));
       setPreviewClient(null);
     }
@@ -736,7 +666,7 @@ export default function MenuTab({
 
     // Check if approved and week is locked
     if (isApproved && isWeekLocked) {
-      alert('This menu is approved and the week is locked. Unlock the week first to make edits.');
+      showToast('This menu is approved and the week is locked. Unlock the week first to make edits.', 'warning');
       return;
     }
 
@@ -768,7 +698,7 @@ export default function MenuTab({
 
     const { client, date, requiredMeals } = editModal;
 
-    if (!window.confirm(`This will delete ALL meals for ${client.displayName || client.name} on ${date} and create ${requiredMeals} blank slot(s). Continue?`)) {
+    if (!(await confirm(`This will delete ALL meals for ${client.displayName || client.name} on ${date} and create ${requiredMeals} blank slot(s). Continue?`))) {
       return;
     }
 
@@ -931,7 +861,7 @@ export default function MenuTab({
       return;
     }
 
-    if (!window.confirm(`Delete bonus meal #${menuRow.mealIndex}?`)) {
+    if (!(await confirm(`Delete bonus meal #${menuRow.mealIndex}?`))) {
       return;
     }
 
@@ -1062,8 +992,7 @@ export default function MenuTab({
     // Block if unapproved menus exist
     if (unapprovedCount > 0) {
       const topClients = Object.entries(unapprovedByClientLocal).slice(0, 3).map(([name, count]) => `${name} (${count})`).join(', ');
-      console.log('[PRINT BLOCKED]', { weekId: selectedWeekId, unapprovedMenuCount: unapprovedCount, unapprovedByClient: unapprovedByClientLocal });
-      alert(`Cannot print yet: ${unapprovedCount} unapproved menu(s).\n\nClients: ${topClients}\n\nApprove all menus first.`);
+      showToast(`Cannot print yet: ${unapprovedCount} unapproved menu(s). Clients: ${topClients}. Approve all menus first.`, 'warning');
       return;
     }
 
@@ -1251,29 +1180,6 @@ export default function MenuTab({
         </div>
       )}
 
-      {/* Toast notification */}
-      {approvalToast && (
-        <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 ${
-            approvalToast.type === 'error'
-              ? 'bg-red-100 text-red-800 border border-red-300'
-              : approvalToast.type === 'success'
-              ? 'bg-green-100 text-green-800 border border-green-300'
-              : 'bg-blue-100 text-blue-800 border border-blue-300'
-          }`}
-        >
-          {approvalToast.type === 'error' && <AlertTriangle size={18} />}
-          {approvalToast.type === 'success' && <Check size={18} />}
-          <span>{approvalToast.message}</span>
-          <button
-            onClick={() => setApprovalToast(null)}
-            className="ml-2 hover:opacity-70"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
       {/* Week Selector */}
       {weeks && selectedWeekId && setSelectedWeekId && (
         <WeekSelector
@@ -1283,6 +1189,28 @@ export default function MenuTab({
           onLockWeek={lockWeekAndSnapshot}
           onUnlockWeek={unlockWeekById}
         />
+      )}
+
+      {/* Hidden clients warning — menus exist but client has no delivery date for this week */}
+      {orphanedMenuClients.length > 0 && (
+        <div className="rounded-lg border-2 border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
+          <AlertTriangle size={20} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-amber-800 text-sm">
+              {orphanedMenuClients.length === 1
+                ? '1 client has menus this week but no delivery date set'
+                : `${orphanedMenuClients.length} clients have menus this week but no delivery date set`}
+            </p>
+            <p className="text-amber-700 text-xs mt-1">
+              They won&apos;t appear in the schedule below until a delivery date is added in the Clients tab.
+            </p>
+            <ul className="mt-2 space-y-0.5">
+              {orphanedMenuClients.map(({ name }) => (
+                <li key={name} className="text-amber-800 text-xs font-medium">• {name}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
       )}
 
       {/* 1. Delivering This Week - Clients grouped by delivery day */}

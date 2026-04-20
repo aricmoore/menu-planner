@@ -140,11 +140,12 @@ CREATE TABLE IF NOT EXISTS menus (
   starch TEXT,
   extras JSONB DEFAULT '[]',
   portions INTEGER,
+  meal_index INTEGER NOT NULL DEFAULT 1, -- supports multiple meals per client per date
   approved BOOLEAN DEFAULT false,
   status TEXT DEFAULT 'unconfirmed', -- unconfirmed, confirmed, skipped
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(client_name, date)  -- Allows upsert by client + date
+  UNIQUE(client_id, date, meal_index)  -- matches onConflict in application code
 );
 
 -- 9. client_dish_picks (for non-Chef Choice clients)

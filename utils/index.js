@@ -43,11 +43,14 @@ export const downloadCSV = (csv, filename) => {
 
 export const categorizeIngredient = (name) => {
   const n = name.toLowerCase();
-  if (['lettuce', 'cucumber', 'tomato', 'onion', 'garlic', 'carrot', 'potato', 'cauliflower', 'broccoli', 'spinach', 'pepper', 'celery', 'mushroom', 'zucchini', 'squash', 'asparagus', 'lemon', 'lime', 'ginger', 'cilantro', 'parsley'].some(x => n.includes(x))) return 'Produce';
-  if (['chicken', 'beef', 'pork', 'salmon', 'fish', 'shrimp', 'turkey', 'lamb', 'bacon', 'sausage', 'steak', 'thigh', 'breast'].some(x => n.includes(x))) return 'Meat & Seafood';
+  // Pantry first: "chicken broth", "beef stock" are pantry items even though they contain meat keywords
+  if (['stock', 'broth', 'rice', 'pasta', 'flour', 'sugar', 'olive oil', 'vegetable oil', 'vinegar', 'sauce', 'honey', 'bread', 'oil'].some(x => n.includes(x))) return 'Pantry & Dry Goods';
+  // Dairy before spices: "unsalted butter" must not match "salt" in the spices list
   if (['milk', 'cheese', 'butter', 'egg', 'cream', 'yogurt'].some(x => n.includes(x))) return 'Dairy & Eggs';
-  if (['salt', 'pepper', 'spice', 'cumin', 'paprika', 'oregano', 'thyme', 'cinnamon', 'cayenne', 'curry'].some(x => n.includes(x))) return 'Spices & Seasonings';
-  if (['rice', 'pasta', 'flour', 'sugar', 'oil', 'vinegar', 'sauce', 'honey', 'bread', 'stock', 'broth'].some(x => n.includes(x))) return 'Pantry & Dry Goods';
+  // Spices before produce: "black pepper" is a spice, not produce; use " salt" to avoid matching "unsalted"
+  if ([' salt', 'kosher salt', 'sea salt', 'black pepper', 'white pepper', 'spice', 'cumin', 'paprika', 'oregano', 'thyme', 'cinnamon', 'cayenne', 'curry', 'turmeric', 'chili powder'].some(x => n.includes(x)) || n === 'salt') return 'Spices & Seasonings';
+  if (['lettuce', 'cucumber', 'tomato', 'onion', 'garlic', 'carrot', 'potato', 'cauliflower', 'broccoli', 'spinach', 'bell pepper', 'celery', 'mushroom', 'zucchini', 'squash', 'asparagus', 'lemon', 'lime', 'ginger', 'cilantro', 'parsley', 'kale', 'arugula', 'beet', 'chard'].some(x => n.includes(x))) return 'Produce';
+  if (['chicken', 'beef', 'pork', 'salmon', 'fish', 'shrimp', 'turkey', 'lamb', 'bacon', 'sausage', 'steak', 'thigh', 'breast'].some(x => n.includes(x))) return 'Meat & Seafood';
   return 'Other';
 };
 

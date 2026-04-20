@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useNotification } from '../components/NotificationContext';
 import { Check, ChevronDown, ChevronUp, Utensils, Calendar, Printer, AlertCircle, RefreshCw, Clock } from 'lucide-react';
 
 // Category display config
@@ -241,6 +242,7 @@ export default function KDSTab({
   unapprovedByClient = {},
   onApproveAll = null
 }) {
+  const { toast } = useNotification();
   const [expandedTiles, setExpandedTiles] = useState({});
   const kdsView = getKDSView();
 
@@ -283,8 +285,7 @@ export default function KDSTab({
     // Block if unapproved menus exist
     if (unapprovedMenuCount > 0) {
       const topClients = Object.entries(unapprovedByClient).slice(0, 3).map(([name, count]) => `${name} (${count})`).join(', ');
-      console.log('[PRINT BLOCKED]', { weekId: selectedWeekId, unapprovedMenuCount, unapprovedByClient });
-      alert(`Cannot print yet: ${unapprovedMenuCount} unapproved menu(s).\n\nClients: ${topClients}\n\nApprove all menus first.`);
+      toast(`Cannot print yet: ${unapprovedMenuCount} unapproved menu(s). Clients: ${topClients}. Approve all menus first.`, 'warning');
       return;
     }
 
