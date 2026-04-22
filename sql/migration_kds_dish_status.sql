@@ -25,9 +25,13 @@ CREATE INDEX IF NOT EXISTS kds_dish_status_week_id_idx
 -- Enable RLS
 ALTER TABLE kds_dish_status ENABLE ROW LEVEL SECURITY;
 
--- Temporary permissive policy (allow all operations for now)
-CREATE POLICY "Allow all operations on kds_dish_status" ON kds_dish_status
-  FOR ALL
+-- Drop old policies (idempotent)
+DROP POLICY IF EXISTS "Allow all operations on kds_dish_status" ON kds_dish_status;
+DROP POLICY IF EXISTS "auth_kds_dish_status_all" ON kds_dish_status;
+
+-- Authenticated only: KDS is an admin-only feature
+CREATE POLICY "auth_kds_dish_status_all" ON kds_dish_status
+  FOR ALL TO authenticated
   USING (true)
   WITH CHECK (true);
 
