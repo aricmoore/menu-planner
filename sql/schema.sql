@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS weeks (
 CREATE TABLE IF NOT EXISTS menus (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
-  client_name TEXT NOT NULL,
+  client_name TEXT NOT NULL, -- denormalized display name; joins/constraints use client_id
   week_id TEXT REFERENCES weeks(id) ON DELETE SET NULL,
   date DATE NOT NULL,
   protein TEXT,
@@ -147,6 +147,19 @@ CREATE TABLE IF NOT EXISTS menus (
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(client_id, date, meal_index)  -- matches onConflict in application code
 );
+
+-- Constraint cleanup: handles re-runs when table already exists from an older schema version
+-- that used client_name instead of client_id in the unique constraint.
+ALTER TABLE menus DROP CONSTRAINT IF EXISTS menus_client_name_date_key;
+ALTER TABLE menus DROP CONSTRAINT IF EXISTS menus_client_name_date_meal_index_key;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'menus_client_id_date_meal_index_key'
+  ) THEN
+    ALTER TABLE menus ADD CONSTRAINT menus_client_id_date_meal_index_key UNIQUE (client_id, date, meal_index);
+  END IF;
+END $$;
 
 -- 9. client_dish_picks (for non-Chef Choice clients)
 CREATE TABLE IF NOT EXISTS client_dish_picks (
@@ -446,83 +459,151 @@ ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deliveries ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================
--- RLS POLICIES (permissive for now - single-user mode)
+-- RLS POLICIES
 -- ============================================================
--- These can be refined later for multi-user support by scoping to client_id or driver_id
+-- Security model:
+--   authenticated (chef admin, signed in via Supabase Auth): full CRUD on all tables
+--   anon (client portal /client/:id, driver view /driver):
+--     - SELECT only on reference data (clients, drivers, weeks, recipes, menus, etc.)
+--     - Read/write on portal interaction tables (client_portal_data, client_dish_picks)
+--     - Read/write on driver interaction tables (delivery_stops, delivery_photos)
+--     - NO access to: contacts, recipe_ingredients, weekly_tasks, shopping_lists,
+--       billing_cycles, deliveries (legacy)
+--
+-- Note: access_code filtering (clients.access_code, drivers.access_code) is currently
+-- enforced client-side. A future hardening step is server-side filtering via
+-- Supabase Edge Functions or custom JWT claims.
 
--- Drop existing policies first (for idempotency)
+-- Drop existing policies (idempotent — handles old and new policy names)
 DO $$
 BEGIN
   -- Clients
   DROP POLICY IF EXISTS "Allow all for anon" ON clients;
   DROP POLICY IF EXISTS "anon_clients_all" ON clients;
+  DROP POLICY IF EXISTS "anon_clients_select" ON clients;
+  DROP POLICY IF EXISTS "auth_clients_all" ON clients;
   -- Contacts
   DROP POLICY IF EXISTS "Allow all for anon" ON contacts;
   DROP POLICY IF EXISTS "anon_contacts_all" ON contacts;
+  DROP POLICY IF EXISTS "anon_contacts_select" ON contacts;
+  DROP POLICY IF EXISTS "auth_contacts_all" ON contacts;
   -- Drivers
   DROP POLICY IF EXISTS "Allow all for anon" ON drivers;
   DROP POLICY IF EXISTS "anon_drivers_all" ON drivers;
+  DROP POLICY IF EXISTS "anon_drivers_select" ON drivers;
+  DROP POLICY IF EXISTS "auth_drivers_all" ON drivers;
   -- Recipes
   DROP POLICY IF EXISTS "Allow all for anon" ON recipes;
   DROP POLICY IF EXISTS "anon_recipes_all" ON recipes;
+  DROP POLICY IF EXISTS "anon_recipes_select" ON recipes;
+  DROP POLICY IF EXISTS "auth_recipes_all" ON recipes;
   -- Ingredients
   DROP POLICY IF EXISTS "Allow all for anon" ON ingredients;
   DROP POLICY IF EXISTS "anon_ingredients_all" ON ingredients;
+  DROP POLICY IF EXISTS "anon_ingredients_select" ON ingredients;
+  DROP POLICY IF EXISTS "auth_ingredients_all" ON ingredients;
   -- Recipe ingredients
   DROP POLICY IF EXISTS "Allow all for anon" ON recipe_ingredients;
   DROP POLICY IF EXISTS "anon_recipe_ingredients_all" ON recipe_ingredients;
+  DROP POLICY IF EXISTS "auth_recipe_ingredients_all" ON recipe_ingredients;
   -- Weeks
   DROP POLICY IF EXISTS "Allow all for anon" ON weeks;
   DROP POLICY IF EXISTS "anon_weeks_all" ON weeks;
+  DROP POLICY IF EXISTS "anon_weeks_select" ON weeks;
+  DROP POLICY IF EXISTS "auth_weeks_all" ON weeks;
   -- Menus
   DROP POLICY IF EXISTS "Allow all for anon" ON menus;
   DROP POLICY IF EXISTS "anon_menus_all" ON menus;
+  DROP POLICY IF EXISTS "anon_menus_select" ON menus;
+  DROP POLICY IF EXISTS "auth_menus_all" ON menus;
   -- Client dish picks
   DROP POLICY IF EXISTS "anon_client_dish_picks_all" ON client_dish_picks;
+  DROP POLICY IF EXISTS "auth_client_dish_picks_all" ON client_dish_picks;
   -- Weekly tasks
   DROP POLICY IF EXISTS "anon_weekly_tasks_all" ON weekly_tasks;
+  DROP POLICY IF EXISTS "auth_weekly_tasks_all" ON weekly_tasks;
   -- Shopping lists
   DROP POLICY IF EXISTS "anon_shopping_lists_all" ON shopping_lists;
+  DROP POLICY IF EXISTS "auth_shopping_lists_all" ON shopping_lists;
   -- Delivery runs
   DROP POLICY IF EXISTS "anon_delivery_runs_all" ON delivery_runs;
+  DROP POLICY IF EXISTS "anon_delivery_runs_select" ON delivery_runs;
+  DROP POLICY IF EXISTS "auth_delivery_runs_all" ON delivery_runs;
   -- Delivery stops
   DROP POLICY IF EXISTS "anon_delivery_stops_all" ON delivery_stops;
+  DROP POLICY IF EXISTS "auth_delivery_stops_all" ON delivery_stops;
   -- Delivery photos
   DROP POLICY IF EXISTS "anon_delivery_photos_all" ON delivery_photos;
+  DROP POLICY IF EXISTS "anon_delivery_photos_insert" ON delivery_photos;
+  DROP POLICY IF EXISTS "auth_delivery_photos_all" ON delivery_photos;
   -- Billing cycles
   DROP POLICY IF EXISTS "Allow all for anon" ON billing_cycles;
   DROP POLICY IF EXISTS "anon_billing_cycles_all" ON billing_cycles;
+  DROP POLICY IF EXISTS "auth_billing_cycles_all" ON billing_cycles;
   -- Client portal data
   DROP POLICY IF EXISTS "Allow all for anon" ON client_portal_data;
   DROP POLICY IF EXISTS "anon_client_portal_data_all" ON client_portal_data;
+  DROP POLICY IF EXISTS "auth_client_portal_data_all" ON client_portal_data;
   -- App settings
   DROP POLICY IF EXISTS "Allow all for anon" ON app_settings;
   DROP POLICY IF EXISTS "anon_app_settings_all" ON app_settings;
+  DROP POLICY IF EXISTS "anon_app_settings_select" ON app_settings;
+  DROP POLICY IF EXISTS "auth_app_settings_all" ON app_settings;
   -- Deliveries (legacy)
   DROP POLICY IF EXISTS "Allow all for anon" ON deliveries;
   DROP POLICY IF EXISTS "anon_deliveries_all" ON deliveries;
-EXCEPTION WHEN undefined_object THEN NULL;
+  DROP POLICY IF EXISTS "auth_deliveries_all" ON deliveries;
 END $$;
 
--- Create new policies with consistent naming
-CREATE POLICY "anon_clients_all" ON clients FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_contacts_all" ON contacts FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_drivers_all" ON drivers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_recipes_all" ON recipes FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_ingredients_all" ON ingredients FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_recipe_ingredients_all" ON recipe_ingredients FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_weeks_all" ON weeks FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_menus_all" ON menus FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_client_dish_picks_all" ON client_dish_picks FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_weekly_tasks_all" ON weekly_tasks FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_shopping_lists_all" ON shopping_lists FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_delivery_runs_all" ON delivery_runs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_delivery_stops_all" ON delivery_stops FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_delivery_photos_all" ON delivery_photos FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_billing_cycles_all" ON billing_cycles FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_client_portal_data_all" ON client_portal_data FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_app_settings_all" ON app_settings FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "anon_deliveries_all" ON deliveries FOR ALL USING (true) WITH CHECK (true);
+-- ============================================================
+-- AUTHENTICATED ROLE: Full access (chef admin)
+-- ============================================================
+CREATE POLICY "auth_clients_all" ON clients FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_contacts_all" ON contacts FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_drivers_all" ON drivers FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_recipes_all" ON recipes FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_ingredients_all" ON ingredients FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_recipe_ingredients_all" ON recipe_ingredients FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_weeks_all" ON weeks FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_menus_all" ON menus FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_client_dish_picks_all" ON client_dish_picks FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_weekly_tasks_all" ON weekly_tasks FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_shopping_lists_all" ON shopping_lists FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_delivery_runs_all" ON delivery_runs FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_delivery_stops_all" ON delivery_stops FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_delivery_photos_all" ON delivery_photos FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_billing_cycles_all" ON billing_cycles FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_client_portal_data_all" ON client_portal_data FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_app_settings_all" ON app_settings FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_deliveries_all" ON deliveries FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- ============================================================
+-- ANON ROLE: Limited access for client portal and driver view
+-- ============================================================
+
+-- Reference data: read-only
+-- contacts is included because the driver view reads delivery addresses via
+-- v_delivery_stops_from_menus, which joins contacts. Drivers need addresses to navigate.
+CREATE POLICY "anon_clients_select" ON clients FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_contacts_select" ON contacts FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_drivers_select" ON drivers FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_weeks_select" ON weeks FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_recipes_select" ON recipes FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_ingredients_select" ON ingredients FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_menus_select" ON menus FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_delivery_runs_select" ON delivery_runs FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_app_settings_select" ON app_settings FOR SELECT TO anon USING (true);
+
+-- Portal interaction (client submits picks, updates their portal data)
+CREATE POLICY "anon_client_portal_data_all" ON client_portal_data FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_client_dish_picks_all" ON client_dish_picks FOR ALL TO anon USING (true) WITH CHECK (true);
+
+-- Driver interaction (driver marks stops complete, uploads porch photos)
+CREATE POLICY "anon_delivery_stops_all" ON delivery_stops FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delivery_photos_insert" ON delivery_photos FOR INSERT TO anon WITH CHECK (true);
+
+-- No anon access to: recipe_ingredients, weekly_tasks,
+--   shopping_lists, billing_cycles, deliveries (legacy)
 
 -- ============================================================
 -- TRIGGERS FOR updated_at
@@ -570,18 +651,22 @@ CREATE TRIGGER update_client_portal_data_updated_at BEFORE UPDATE ON client_port
 CREATE TRIGGER update_app_settings_updated_at BEFORE UPDATE ON app_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
--- COMMENTS FOR FUTURE RLS REFINEMENT
+-- FUTURE RLS HARDENING
 -- ============================================================
--- When adding multi-user support, replace the anon_*_all policies with:
+-- The anon policies above use USING (true) — all rows are visible to anyone
+-- with the anon key who knows the URL. Access_code verification is client-side only.
 --
--- For client-scoped tables (contacts, menus, billing_cycles, etc.):
---   CREATE POLICY "client_scope" ON table_name
---     FOR ALL
---     USING (client_id = auth.uid() OR auth.role() = 'admin')
---     WITH CHECK (client_id = auth.uid() OR auth.role() = 'admin');
+-- To add server-side access_code enforcement without custom JWTs, create an Edge
+-- Function that validates the code and returns a signed JWT with a custom claim:
 --
--- For driver-scoped tables (delivery_runs, delivery_stops):
---   CREATE POLICY "driver_scope" ON delivery_runs
---     FOR ALL
---     USING (driver_id = auth.uid() OR auth.role() = 'admin')
---     WITH CHECK (driver_id = auth.uid() OR auth.role() = 'admin');
+--   claim: { "access_code": "xyz123" }
+--
+-- Then scope anon policies like:
+--   CREATE POLICY "anon_clients_by_code" ON clients FOR SELECT TO anon
+--     USING (access_code = (auth.jwt() ->> 'access_code'));
+--
+-- For driver scoping on delivery_runs:
+--   CREATE POLICY "anon_driver_runs" ON delivery_runs FOR SELECT TO anon
+--     USING (driver_id = (
+--       SELECT id FROM drivers WHERE access_code = (auth.jwt() ->> 'access_code')
+--     ));

@@ -20,9 +20,12 @@ CREATE INDEX IF NOT EXISTS idx_client_week_status_status ON client_week_status(s
 -- Enable RLS
 ALTER TABLE client_week_status ENABLE ROW LEVEL SECURITY;
 
--- RLS policy (permissive for single-user mode)
+-- Drop old policies (idempotent)
 DROP POLICY IF EXISTS "anon_client_week_status_all" ON client_week_status;
-CREATE POLICY "anon_client_week_status_all" ON client_week_status FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "auth_client_week_status_all" ON client_week_status;
+
+-- Authenticated only: week planning state is an admin-only feature
+CREATE POLICY "auth_client_week_status_all" ON client_week_status FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- Trigger for updated_at
 DROP TRIGGER IF EXISTS update_client_week_status_updated_at ON client_week_status;
